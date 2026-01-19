@@ -1,0 +1,556 @@
+openapi: 3.0.3
+info:
+  title: Time Ledger Sim
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+
+  /v1/version:
+    get:
+      summary: Build/version info
+      responses:
+        "200":
+          description: Version info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionInfo"
+
+  /v1/zones:
+    get:
+      summary: List zones
+      responses:
+        "200":
+          description: Zones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Zone"
+
+  /v1/zones/{zone_id}/status:
+    post:
+      summary: Set zone status
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetZoneStatusRequest"
+      responses:
+        "200":
+          description: Updated zone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Zone"
+
+  /v1/transfers:
+    post:
+      summary: Create transfer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferRequest"
+      responses:
+        "200":
+          description: Applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferAppliedResponse"
+        "202":
+          description: Spooled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransferSpooledResponse"
+        "409":
+          description: Idempotency conflict
+        "503":
+          description: Zone blocked
+
+  /v1/balances:
+    get:
+      summary: List balances
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100 }
+      responses:
+        "200":
+          description: Balances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BalanceRow"
+
+  /v1/transactions:
+    get:
+      summary: List transactions
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100 }
+      responses:
+        "200":
+          description: Transactions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TransactionRow"
+
+  /v1/transactions/{transaction_id}:
+    get:
+      summary: Get transaction detail
+      parameters:
+        - name: transaction_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Transaction detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionDetail"
+        "404":
+          description: Not found
+
+  /v1/zones/{zone_id}/incidents:
+    get:
+      summary: List incidents for a zone
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100 }
+      responses:
+        "200":
+          description: Incidents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IncidentSummary"
+
+  /v1/incidents:
+    get:
+      summary: List recent incidents
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100 }
+      responses:
+        "200":
+          description: Incidents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IncidentSummary"
+
+  /v1/incidents/{incident_id}:
+    get:
+      summary: Get incident detail
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Incident detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentDetail"
+        "404":
+          description: Not found
+
+  /v1/incidents/{incident_id}/action:
+    post:
+      summary: Apply incident action
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentActionRequest"
+      responses:
+        "200":
+          description: Updated incident
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentDetail"
+
+  /v1/zones/{zone_id}/controls:
+    get:
+      summary: Get zone controls
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Controls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZoneControls"
+    post:
+      summary: Set zone controls
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ZoneControlsUpdate"
+      responses:
+        "200":
+          description: Controls
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ZoneControls"
+
+  /v1/zones/{zone_id}/spool:
+    get:
+      summary: Get spool stats
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Spool stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpoolStats"
+
+  /v1/zones/{zone_id}/spool/replay:
+    post:
+      summary: Replay spooled transfers
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplayRequest"
+      responses:
+        "200":
+          description: Replay result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReplayResult"
+
+  /v1/zones/{zone_id}/audit:
+    get:
+      summary: List audit entries for a zone
+      parameters:
+        - name: zone_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 120 }
+      responses:
+        "200":
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
+
+  /v1/sim/snapshot:
+    post:
+      summary: Export snapshot (admin)
+      responses:
+        "200":
+          description: Snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snapshot"
+        "401":
+          description: Unauthorized
+
+  /v1/sim/restore:
+    post:
+      summary: Restore snapshot (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Snapshot"
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Unauthorized
+
+components:
+  schemas:
+    VersionInfo:
+      type: object
+      properties:
+        service: { type: string }
+        language: { type: string }
+        version: { type: string }
+        revision: { type: string }
+        build_time: { type: string }
+        modified: { type: boolean }
+        go_version: { type: string }
+        platform: { type: string }
+      required: [service, language, version, go_version, platform]
+
+    Zone:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        status: { type: string, enum: [OK, DEGRADED, DOWN] }
+        updated_at: { type: string }
+      required: [id, name, status]
+
+    SetZoneStatusRequest:
+      type: object
+      properties:
+        status: { type: string, enum: [OK, DEGRADED, DOWN] }
+        actor: { type: string }
+        reason: { type: string }
+      required: [status]
+
+    TransferRequest:
+      type: object
+      properties:
+        request_id: { type: string }
+        from_account: { type: string }
+        to_account: { type: string }
+        amount_units: { type: integer, format: int64 }
+        zone_id: { type: string }
+        metadata: { type: object }
+      required: [request_id, from_account, to_account, amount_units, zone_id]
+
+    TransferAppliedResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [APPLIED] }
+        transaction_id: { type: string }
+      required: [status, transaction_id]
+
+    TransferSpooledResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [SPOOLED] }
+        spool_id: { type: string }
+        request_id: { type: string }
+      required: [status, spool_id, request_id]
+
+    BalanceRow:
+      type: object
+      properties:
+        account_id: { type: string }
+        balance_units: { type: integer, format: int64 }
+        updated_at: { type: string }
+      required: [account_id, balance_units]
+
+    TransactionRow:
+      type: object
+      properties:
+        id: { type: string }
+        from_account: { type: string }
+        to_account: { type: string }
+        amount_units: { type: integer, format: int64 }
+        zone_id: { type: string }
+        created_at: { type: string }
+      required: [id, from_account, to_account, amount_units, zone_id, created_at]
+
+    PostingRow:
+      type: object
+      properties:
+        account_id: { type: string }
+        direction: { type: string, enum: [DEBIT, CREDIT] }
+        amount_units: { type: integer, format: int64 }
+      required: [account_id, direction, amount_units]
+
+    TransactionDetail:
+      type: object
+      properties:
+        id: { type: string }
+        from_account: { type: string }
+        to_account: { type: string }
+        amount_units: { type: integer, format: int64 }
+        zone_id: { type: string }
+        created_at: { type: string }
+        metadata: { type: object }
+        postings:
+          type: array
+          items: { $ref: "#/components/schemas/PostingRow" }
+      required: [id, from_account, to_account, amount_units, zone_id, created_at, postings]
+
+    IncidentSummary:
+      type: object
+      properties:
+        id: { type: string }
+        zone_id: { type: string }
+        severity: { type: string, enum: [INFO, WARN, CRITICAL] }
+        status: { type: string }
+        title: { type: string }
+        detected_at: { type: string }
+      required: [id, zone_id, severity, title, detected_at]
+
+    IncidentDetail:
+      allOf:
+        - $ref: "#/components/schemas/IncidentSummary"
+        - type: object
+          properties:
+            details: { type: object }
+            txn_id: { type: string }
+
+    IncidentActionRequest:
+      type: object
+      properties:
+        action: { type: string, enum: [ACK, ASSIGN, RESOLVE] }
+        assignee: { type: string }
+        note: { type: string }
+        actor: { type: string }
+      required: [action]
+
+    ZoneControls:
+      type: object
+      properties:
+        zone_id: { type: string }
+        writes_blocked: { type: boolean }
+        cross_zone_throttle: { type: integer, minimum: 0, maximum: 100 }
+        spool_enabled: { type: boolean }
+        updated_at: { type: string }
+      required: [zone_id, writes_blocked, cross_zone_throttle, spool_enabled]
+
+    ZoneControlsUpdate:
+      type: object
+      properties:
+        writes_blocked: { type: boolean }
+        cross_zone_throttle: { type: integer, minimum: 0, maximum: 100 }
+        spool_enabled: { type: boolean }
+        actor: { type: string }
+        reason: { type: string }
+
+    SpoolStats:
+      type: object
+      properties:
+        zone_id: { type: string }
+        pending: { type: integer }
+        applied: { type: integer }
+        failed: { type: integer }
+      required: [zone_id, pending, applied, failed]
+
+    ReplayRequest:
+      type: object
+      properties:
+        limit: { type: integer, default: 50 }
+        actor: { type: string }
+        reason: { type: string }
+
+    ReplayResult:
+      type: object
+      properties:
+        attempted: { type: integer }
+        applied: { type: integer }
+        failed: { type: integer }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: string }
+        zone_id: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string }
+        action: { type: string }
+        actor: { type: string }
+        reason: { type: string }
+        details: { type: object }
+        created_at: { type: string }
+      required: [id, action, created_at]
+
+    Snapshot:
+      type: object
+      properties:
+        exported_at: { type: string }
+        zones:
+          type: array
+          items: { $ref: "#/components/schemas/Zone" }
+        controls:
+          type: array
+          items: { $ref: "#/components/schemas/ZoneControls" }
+        balances:
+          type: array
+          items: { $ref: "#/components/schemas/BalanceRow" }
+        transactions:
+          type: array
+          items: { $ref: "#/components/schemas/TransactionDetail" }
+        incidents:
+          type: array
+          items: { $ref: "#/components/schemas/IncidentDetail" }
+        spooled_transfers:
+          type: array
+          items: { type: object }
+        audit:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEntry" }
+      required: [exported_at]

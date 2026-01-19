@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: sim-go
+    static_configs:
+      - targets: ['sim-go:8080']
+  - job_name: sim-rust
+    static_configs:
+      - targets: ['sim-rust:8081']

@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:16.11
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: timeledger
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d timeledger"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  nats:
+    image: nats:2.12.3
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  migrate:
+    image: flyway/flyway:11.20.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../db/migrations:/flyway/sql
+    command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=postgres", "-password=postgres", "migrate"]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.143.1
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml
+    ports:
+      - "4318:4318"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+
+  prometheus:
+    image: prom/prometheus:v3.9.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:12.3.1
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+
+  sim-go:
+    build:
+      context: ../go
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger?sslmode=disable
+      - NATS_URL=nats://nats:4222
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - ADMIN_KEY=dev-admin-key
+    ports:
+      - "8080:8080"
+
+  sim-rust:
+    build:
+      context: ../rust/sim
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      - PORT=8081
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger
+      - NATS_URL=nats://nats:4222
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - ADMIN_KEY=dev-admin-key
+    ports:
+      - "8081:8081"

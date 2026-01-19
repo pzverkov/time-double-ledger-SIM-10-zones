@@ -1,0 +1,13 @@
+# Go
+go/cover.out
+go/go.sum
+
+# Rust
+rust/**/target/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
