@@ -1,5 +1,5 @@
-\
 use axum::{
+    body::Body,
     extract::{Path, Request, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
@@ -7,12 +7,13 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use prometheus::Encoder;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{PgPool, Row};
 use std::{env, net::SocketAddr, sync::Arc};
 use tracing::{info};
-use uuid::Uuid;
+// uuid kept in Cargo.toml for DB ids and request ids in other modules, but not used in this binary.
 
 #[derive(Clone)]
 struct AppState {
@@ -156,7 +157,7 @@ struct BalanceRow {
     updated_at: String,
 }
 
-async fn list_balances(State(st): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn list_balances(State(st): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let rows = sqlx::query("SELECT account_id, balance_units, updated_at FROM balances ORDER BY updated_at DESC LIMIT 100")
         .fetch_all(&st.db)
         .await
@@ -185,7 +186,7 @@ struct TxnRow {
     created_at: String,
 }
 
-async fn list_transactions(State(st): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn list_transactions(State(st): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let rows = sqlx::query("SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at FROM transactions ORDER BY created_at DESC LIMIT 100")
         .fetch_all(&st.db)
         .await
@@ -214,7 +215,7 @@ struct PostingRow {
     amount_units: i64,
 }
 
-async fn get_transaction(Path(transaction_id): Path<String>, State(st): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+async fn get_transaction(Path(transaction_id): Path<String>, State(st): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     let row = sqlx::query("SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at, metadata FROM transactions WHERE id::text=$1")
         .bind(&transaction_id)
         .fetch_one(&st.db)
@@ -249,7 +250,7 @@ async fn get_transaction(Path(transaction_id): Path<String>, State(st): State<Ar
     })))
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CreateTransferRequest {
     request_id: String,
     from_account: String,
@@ -635,7 +636,7 @@ async fn main() {
     let port = env::var("PORT").unwrap_or_else(|_| "8081".into());
     let admin_key = env::var("ADMIN_KEY").ok();
 
-    let (registry, metrics) = init_metrics();
+    let (registry, metrics_state) = init_metrics();
 
     let db = PgPool::connect(&database_url).await.expect("db connect");
 
@@ -643,7 +644,7 @@ async fn main() {
         db,
         admin_key,
         registry,
-        metrics,
+        metrics: metrics_state,
     };
 
     let app = Router::new()
