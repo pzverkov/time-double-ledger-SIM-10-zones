@@ -1,4 +1,3 @@
-\
 pub fn net_zero(amount: i64) -> i64 {
     -amount + amount
 }

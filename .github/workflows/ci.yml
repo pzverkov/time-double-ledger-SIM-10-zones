@@ -13,6 +13,8 @@ jobs:
   go:
     name: Go build & test (${{ matrix.go }})
     runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -mod=mod
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +25,7 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
-          cache-dependency-path: go/go.sum
+          cache-dependency-path: go/go.mod
       - name: Force local toolchain
         run: echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
       - name: Download modules
