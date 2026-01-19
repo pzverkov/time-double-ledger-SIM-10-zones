@@ -1,4 +1,4 @@
-# Time Ledger Sim — Operator Dashboard
+# Time Ledger Sim: Operator Dashboard
 
 This is a static operator console for the Time Ledger simulation (zones + ledger + incidents).
 
