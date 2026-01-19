@@ -25,7 +25,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          # No lockfile is committed in this repo, so dependency caching would fail.
+          # (If you add package-lock.json later, you can re-enable cache: npm.)
       - run: npm install
       - run: npm run build
       - uses: actions/upload-pages-artifact@v4

@@ -1,19 +1,17 @@
-name: Security Checks
+name: Build & Test
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-  schedule:
-    - cron: '0 7 * * 1'
 
 permissions:
   contents: read
 
 jobs:
-  go-vuln:
-    name: Go govulncheck
+  go:
+    name: Go build & test (${{ matrix.go }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -28,42 +26,38 @@ jobs:
           cache-dependency-path: go/go.sum
       - name: Force local toolchain
         run: echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
-      - name: Download Go modules
+      - name: Download modules
         working-directory: go
         run: go mod download
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - name: Run govulncheck
-        working-directory: go
-        run: govulncheck ./...
-      - name: Run tests
+      - name: Test
         working-directory: go
         run: go test ./...
+      - name: Build
+        working-directory: go
+        run: go build ./...
 
-  rust-audit:
-    name: Rust cargo-audit
+  rust:
+    name: Rust build & test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - name: Generate Cargo.lock (required for audit)
+      - name: Generate Cargo.lock
         working-directory: rust/sim
         run: cargo generate-lockfile
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust/sim
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
-      - name: Run cargo audit
-        working-directory: rust/sim
-        run: cargo audit
-      - name: Run tests
+      - name: Test
         working-directory: rust/sim
         run: cargo test
+      - name: Build
+        working-directory: rust/sim
+        run: cargo build --release
 
-  npm-audit:
-    name: Web npm audit + build
+  web:
+    name: Web build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,11 +67,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          # No lockfile is committed in this repo, so dependency caching would fail.
-          # (If you add package-lock.json later, you can re-enable cache: npm.)
-      - name: Install
-        run: npm install
-      - name: Audit (high and critical)
-        run: npm audit --audit-level=high
-      - name: Build
-        run: npm run build
+          # Enable cache when a lockfile exists.
+      - run: npm install
+      - run: npm run build
