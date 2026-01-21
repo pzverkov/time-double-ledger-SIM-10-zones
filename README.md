@@ -127,7 +127,7 @@ curl -s http://localhost:8080/v1/transactions/<txn-id> | jq .
 
 ## Version manifest
 
-Both backends expose build info at:
+Both backends (Go and Rust) expose build info at:
 
 - `GET /v1/version`
 
