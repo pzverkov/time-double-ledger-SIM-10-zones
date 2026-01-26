@@ -1,10 +1,10 @@
 module time-ledger-sim/go
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/go-chi/chi/v5 v5.2.4
-	github.com/jackc/pgx/v5 v5.7.5
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/nats-io/nats.go v1.48.0
 	github.com/prometheus/client_golang v1.23.2
 	go.opentelemetry.io/otel v1.39.0
