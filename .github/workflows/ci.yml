@@ -20,7 +20,7 @@ jobs:
       matrix:
         # Minimum supported Go version for this repo.
         # (We can add newer versions once they're available on GitHub-hosted runners.)
-        go: [ '1.24.x' ]
+        go: [ '1.26.x' ]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
