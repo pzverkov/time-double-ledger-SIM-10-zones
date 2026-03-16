@@ -7,17 +7,17 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use deadpool_postgres::Pool;
 use prometheus::Encoder;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{PgPool, Row};
 use std::{env, net::SocketAddr, sync::Arc};
-use tracing::{info};
-// uuid kept in Cargo.toml for DB ids and request ids in other modules, but not used in this binary.
+use tokio_postgres::NoTls;
+use tracing::info;
 
 #[derive(Clone)]
 struct AppState {
-    db: PgPool,
+    db: Pool,
     admin_key: Option<String>,
     registry: Arc<prometheus::Registry>,
     metrics: Arc<Metrics>,
@@ -44,7 +44,7 @@ fn init_metrics() -> (Arc<prometheus::Registry>, Arc<Metrics>) {
     (Arc::new(reg), Arc::new(Metrics { transfers_total }))
 }
 
-async fn cors(mut req: Request, next: Next) -> Response {
+async fn cors(req: Request, next: Next) -> Response {
     let origin = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()).map(|s| s.to_string());
     let allowed = std::env::var("CORS_ALLOW_ORIGINS").unwrap_or_else(|_| "http://localhost:5173,http://localhost:4173".to_string());
     let allow_any = allowed.split(',').any(|x| x.trim() == "*");
@@ -127,8 +127,8 @@ struct Zone {
 }
 
 async fn list_zones(State(st): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let rows = sqlx::query("SELECT id,name,status,updated_at FROM zones ORDER BY id")
-        .fetch_all(&st.db)
+    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = client.query("SELECT id,name,status,updated_at FROM zones ORDER BY id", &[])
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -158,8 +158,8 @@ struct BalanceRow {
 }
 
 async fn list_balances(State(st): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let rows = sqlx::query("SELECT account_id, balance_units, updated_at FROM balances ORDER BY updated_at DESC LIMIT 100")
-        .fetch_all(&st.db)
+    let client = st.db.get().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows = client.query("SELECT account_id, balance_units, updated_at FROM balances ORDER BY updated_at DESC LIMIT 100", &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -187,8 +187,8 @@ struct TxnRow {
 }
 
 async fn list_transactions(State(st): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let rows = sqlx::query("SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at FROM transactions ORDER BY created_at DESC LIMIT 100")
-        .fetch_all(&st.db)
+    let client = st.db.get().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let rows = client.query("SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at FROM transactions ORDER BY created_at DESC LIMIT 100", &[])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -216,18 +216,21 @@ struct PostingRow {
 }
 
 async fn get_transaction(Path(transaction_id): Path<String>, State(st): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let row = sqlx::query("SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at, metadata FROM transactions WHERE id::text=$1")
-        .bind(&transaction_id)
-        .fetch_one(&st.db)
+    let client = st.db.get().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let row = client.query_one("SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at, metadata FROM transactions WHERE id::text=$1", &[&transaction_id])
         .await
         .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
 
+    let id: String = row.get("id");
+    let request_id: String = row.get("request_id");
+    let from_account: String = row.get("from_account");
+    let to_account: String = row.get("to_account");
+    let amount_units: i64 = row.get("amount_units");
+    let zone_id: String = row.get("zone_id");
     let created_at: time::OffsetDateTime = row.get("created_at");
     let metadata: serde_json::Value = row.get("metadata");
 
-    let post_rows = sqlx::query("SELECT account_id, direction, amount_units FROM postings WHERE txn_id::text=$1 ORDER BY direction ASC")
-        .bind(&transaction_id)
-        .fetch_all(&st.db)
+    let post_rows = client.query("SELECT account_id, direction, amount_units FROM postings WHERE txn_id::text=$1 ORDER BY direction ASC", &[&transaction_id])
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -238,12 +241,12 @@ async fn get_transaction(Path(transaction_id): Path<String>, State(st): State<Ap
     }).collect();
 
     Ok(Json(json!({
-        "id": row.get::<String,_>("id"),
-        "request_id": row.get::<String,_>("request_id"),
-        "from_account": row.get::<String,_>("from_account"),
-        "to_account": row.get::<String,_>("to_account"),
-        "amount_units": row.get::<i64,_>("amount_units"),
-        "zone_id": row.get::<String,_>("zone_id"),
+        "id": id,
+        "request_id": request_id,
+        "from_account": from_account,
+        "to_account": to_account,
+        "amount_units": amount_units,
+        "zone_id": zone_id,
         "created_at": created_at.format(&time::format_description::well_known::Rfc3339).unwrap(),
         "metadata": metadata,
         "postings": postings
@@ -308,28 +311,23 @@ async fn create_transfer(
         return Err(StatusCode::BAD_REQUEST);
     }
     let hash = payload_hash(&req)?;
-    let mut tx = st
-        .db
-        .begin()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tx = client.transaction().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // zone gate
-    let status: String = sqlx::query_scalar("SELECT status FROM zones WHERE id=$1")
-        .bind(&req.zone_id)
-        .fetch_one(&mut *tx)
+    let status_row = tx.query_one("SELECT status FROM zones WHERE id=$1", &[&req.zone_id])
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let status: String = status_row.get(0);
     if status == "DOWN" {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
     // idempotency check
-    let existing = sqlx::query(
+    let existing = tx.query_opt(
         "SELECT id::text, payload_hash, created_at FROM transactions WHERE request_id=$1",
+        &[&req.request_id],
     )
-    .bind(&req.request_id)
-    .fetch_optional(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -353,56 +351,46 @@ async fn create_transfer(
     }
 
     // ensure accounts exist (zone-scoped)
-    sqlx::query("INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING")
-        .bind(&req.from_account)
-        .bind(&req.zone_id)
-        .execute(&mut *tx)
+    tx.execute("INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        &[&req.from_account, &req.zone_id])
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    sqlx::query("INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING")
-        .bind(&req.to_account)
-        .bind(&req.zone_id)
-        .execute(&mut *tx)
+    tx.execute("INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+        &[&req.to_account, &req.zone_id])
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let row = sqlx::query("INSERT INTO transactions(request_id,payload_hash,from_account,to_account,amount_units,zone_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at")
-        .bind(&req.request_id)
-        .bind(&hash)
-        .bind(&req.from_account)
-        .bind(&req.to_account)
-        .bind(req.amount_units)
-        .bind(&req.zone_id)
-        .bind(&req.metadata)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row = tx.query_one(
+        "INSERT INTO transactions(request_id,payload_hash,from_account,to_account,amount_units,zone_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at",
+        &[&req.request_id, &hash, &req.from_account, &req.to_account, &req.amount_units, &req.zone_id, &req.metadata],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let txn_id: String = row.get(0);
     let created_at: time::OffsetDateTime = row.get(1);
 
     // postings
-    sqlx::query("INSERT INTO postings(txn_id,account_id,direction,amount_units) VALUES($1::uuid,$2,'DEBIT',$3),($1::uuid,$4,'CREDIT',$3)")
-        .bind(&txn_id)
-        .bind(&req.from_account)
-        .bind(req.amount_units)
-        .bind(&req.to_account)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.execute(
+        "INSERT INTO postings(txn_id,account_id,direction,amount_units) VALUES($1::uuid,$2,'DEBIT',$3),($1::uuid,$4,'CREDIT',$3)",
+        &[&txn_id, &req.from_account, &req.amount_units, &req.to_account],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // balances projection
-    sqlx::query("INSERT INTO balances(account_id,balance_units) VALUES($1,$2) ON CONFLICT (account_id) DO UPDATE SET balance_units=balances.balance_units + EXCLUDED.balance_units, updated_at=now()")
-        .bind(&req.from_account)
-        .bind(-req.amount_units)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    sqlx::query("INSERT INTO balances(account_id,balance_units) VALUES($1,$2) ON CONFLICT (account_id) DO UPDATE SET balance_units=balances.balance_units + EXCLUDED.balance_units, updated_at=now()")
-        .bind(&req.to_account)
-        .bind(req.amount_units)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let neg_amount = -req.amount_units;
+    tx.execute(
+        "INSERT INTO balances(account_id,balance_units) VALUES($1,$2) ON CONFLICT (account_id) DO UPDATE SET balance_units=balances.balance_units + EXCLUDED.balance_units, updated_at=now()",
+        &[&req.from_account, &neg_amount],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.execute(
+        "INSERT INTO balances(account_id,balance_units) VALUES($1,$2) ON CONFLICT (account_id) DO UPDATE SET balance_units=balances.balance_units + EXCLUDED.balance_units, updated_at=now()",
+        &[&req.to_account, &req.amount_units],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // outbox
     let payload = json!({
@@ -414,12 +402,13 @@ async fn create_transfer(
         "amount_units": req.amount_units,
         "created_at": created_at.format(&time::format_description::well_known::Rfc3339).unwrap()
     });
-    sqlx::query("INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload) VALUES('TransferPosted','transaction',$1,$2)")
-        .bind(payload["transaction_id"].as_str().unwrap())
-        .bind(&payload)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let aggregate_id = txn_id.as_str();
+    tx.execute(
+        "INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload) VALUES('TransferPosted','transaction',$1,$2)",
+        &[&aggregate_id, &payload],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tx.commit()
         .await
@@ -453,48 +442,44 @@ async fn set_zone_status(
     if req.status != "OK" && req.status != "DEGRADED" && req.status != "DOWN" {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let mut tx = st
-        .db
-        .begin()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let row = sqlx::query(
+    let mut client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tx = client.transaction().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let row = tx.query_one(
         "UPDATE zones SET status=$2, updated_at=now() WHERE id=$1 RETURNING id,name,status,updated_at",
+        &[&zone_id, &req.status],
     )
-    .bind(&zone_id)
-    .bind(&req.status)
-    .fetch_one(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    sqlx::query("INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4))")
-        .bind(&req.actor)
-        .bind(&zone_id)
-        .bind(&req.reason)
-        .bind(&req.status)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.execute(
+        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4))",
+        &[&req.actor, &zone_id, &req.reason, &req.status],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if req.status == "DOWN" {
-        sqlx::query("INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2,'actor',$3))")
-            .bind(&zone_id)
-            .bind(&req.reason)
-            .bind(&req.actor)
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.execute(
+            "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2,'actor',$3))",
+            &[&zone_id, &req.reason, &req.actor],
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
+    let id: String = row.get("id");
+    let name: String = row.get("name");
+    let status: String = row.get("status");
     let updated_at: time::OffsetDateTime = row.get("updated_at");
     Ok(Json(json!({
-        "id": row.get::<String,_>("id"),
-        "name": row.get::<String,_>("name"),
-        "status": row.get::<String,_>("status"),
+        "id": id,
+        "name": name,
+        "status": status,
         "updated_at": updated_at.format(&time::format_description::well_known::Rfc3339).unwrap()
     })))
 }
@@ -503,22 +488,30 @@ async fn list_incidents_by_zone(
     State(st): State<AppState>,
     Path(zone_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let rows = sqlx::query("SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE zone_id=$1 ORDER BY detected_at DESC LIMIT 200")
-        .bind(&zone_id)
-        .fetch_all(&st.db)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = client.query(
+        "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE zone_id=$1 ORDER BY detected_at DESC LIMIT 200",
+        &[&zone_id],
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let incs: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|r| {
             let dt: time::OffsetDateTime = r.get("detected_at");
+            let id: String = r.get("id");
+            let zone_id: String = r.get("zone_id");
+            let severity: String = r.get("severity");
+            let status: String = r.get("status");
+            let title: String = r.get("title");
+            let details: serde_json::Value = r.get("details");
             json!({
-                "id": r.get::<String,_>("id"),
-                "zone_id": r.get::<String,_>("zone_id"),
-                "severity": r.get::<String,_>("severity"),
-                "status": r.get::<String,_>("status"),
-                "title": r.get::<String,_>("title"),
-                "details": r.get::<serde_json::Value,_>("details"),
+                "id": id,
+                "zone_id": zone_id,
+                "severity": severity,
+                "status": status,
+                "title": title,
+                "details": details,
                 "detected_at": dt.format(&time::format_description::well_known::Rfc3339).unwrap(),
             })
         })
@@ -530,19 +523,27 @@ async fn get_incident(
     State(st): State<AppState>,
     Path(incident_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let row = sqlx::query("SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::uuid")
-        .bind(&incident_id)
-        .fetch_one(&st.db)
-        .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let row = client.query_one(
+        "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::uuid",
+        &[&incident_id],
+    )
+    .await
+    .map_err(|_| StatusCode::NOT_FOUND)?;
+    let id: String = row.get("id");
+    let zone_id: String = row.get("zone_id");
+    let severity: String = row.get("severity");
+    let status: String = row.get("status");
+    let title: String = row.get("title");
+    let details: serde_json::Value = row.get("details");
     let dt: time::OffsetDateTime = row.get("detected_at");
     Ok(Json(json!({
-        "id": row.get::<String,_>("id"),
-        "zone_id": row.get::<String,_>("zone_id"),
-        "severity": row.get::<String,_>("severity"),
-        "status": row.get::<String,_>("status"),
-        "title": row.get::<String,_>("title"),
-        "details": row.get::<serde_json::Value,_>("details"),
+        "id": id,
+        "zone_id": zone_id,
+        "severity": severity,
+        "status": status,
+        "title": title,
+        "details": details,
         "detected_at": dt.format(&time::format_description::well_known::Rfc3339).unwrap()
     })))
 }
@@ -569,18 +570,19 @@ async fn snapshot(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     admin_guard(&st, &headers)?;
-    // Minimal snapshot: zones + balances
     let zones_val = list_zones(State(st.clone())).await?.0;
-    let rows = sqlx::query("SELECT account_id, balance_units FROM balances ORDER BY account_id LIMIT 5000")
-        .fetch_all(&st.db)
+    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = client.query("SELECT account_id, balance_units FROM balances ORDER BY account_id LIMIT 5000", &[])
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let balances: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|r| {
+            let account_id: String = r.get("account_id");
+            let balance_units: i64 = r.get("balance_units");
             json!({
-                "account_id": r.get::<String,_>("account_id"),
-                "balance_units": r.get::<i64,_>("balance_units")
+                "account_id": account_id,
+                "balance_units": balance_units
             })
         })
         .collect();
@@ -593,13 +595,10 @@ async fn restore(
     Json(snap): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     admin_guard(&st, &headers)?;
-    let mut tx = st
-        .db
-        .begin()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    sqlx::query("TRUNCATE TABLE balances RESTART IDENTITY CASCADE")
-        .execute(&mut *tx)
+    let mut client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tx = client.transaction().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    tx.execute("TRUNCATE TABLE balances RESTART IDENTITY CASCADE", &[])
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -608,17 +607,18 @@ async fn restore(
             let aid = b.get("account_id").and_then(|v| v.as_str()).unwrap_or("");
             let bu = b.get("balance_units").and_then(|v| v.as_i64()).unwrap_or(0);
             if !aid.is_empty() {
-                sqlx::query("INSERT INTO accounts(id, zone_id) VALUES($1,'zone-eu') ON CONFLICT DO NOTHING")
-                    .bind(aid)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                sqlx::query("INSERT INTO balances(account_id,balance_units) VALUES($1,$2)")
-                    .bind(aid)
-                    .bind(bu)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                tx.execute(
+                    "INSERT INTO accounts(id, zone_id) VALUES($1,'zone-eu') ON CONFLICT DO NOTHING",
+                    &[&aid],
+                )
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                tx.execute(
+                    "INSERT INTO balances(account_id,balance_units) VALUES($1,$2)",
+                    &[&aid, &bu],
+                )
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
         }
     }
@@ -638,10 +638,12 @@ async fn main() {
 
     let (registry, metrics_state) = init_metrics();
 
-    let db = PgPool::connect(&database_url).await.expect("db connect");
+    let pg_config = database_url.parse::<tokio_postgres::Config>().expect("invalid DATABASE_URL");
+    let mgr = deadpool_postgres::Manager::new(pg_config, NoTls);
+    let pool = deadpool_postgres::Pool::builder(mgr).max_size(16).build().expect("pool build");
 
     let st = AppState {
-        db,
+        db: pool,
         admin_key,
         registry,
         metrics: metrics_state,
