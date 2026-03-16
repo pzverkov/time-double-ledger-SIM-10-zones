@@ -8,7 +8,7 @@ A small but production-flavored simulation backend for a "time-currency" ledger 
 - Observability: structured logs, Prometheus metrics, OpenTelemetry traces (Jaeger)
 
 Two interchangeable backends are included:
-- `go/` (Go 1.25+) - recommended as the “primary” MVP
+- `go/` (Go 1.26+) - recommended as the “primary” MVP
 - `rust/` (Rust stable) - feature-parity implementation
 
 ## Dashboard (web/)
@@ -33,7 +33,7 @@ Note: dependency downloads (Go modules / Rust crates) require internet access on
 
 Requirements:
 - Docker + Docker Compose
-- Go 1.25+ (for local dev) and/or Rust stable
+- Go 1.26+ (for local dev) and/or Rust stable
 
 Tip: for fully reproducible builds, generate lockfiles once and commit them:
 

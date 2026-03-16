@@ -11,3 +11,6 @@ rust/**/target/
 # IDE
 .vscode/
 .idea/
+
+# Local env overrides (may contain secrets)
+infra/.env

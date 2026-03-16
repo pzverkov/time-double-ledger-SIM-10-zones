@@ -1,9 +1,9 @@
 services:
   postgres:
-    image: postgres:16.11
+    image: postgres:16.13
     environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_DB: timeledger
     ports:
       - "5432:5432"
@@ -14,7 +14,7 @@ services:
       retries: 20
 
   nats:
-    image: nats:2.12.3
+    image: nats:2.12.5
     command: ["-js", "-m", "8222"]
     ports:
       - "4222:4222"
@@ -27,10 +27,10 @@ services:
         condition: service_healthy
     volumes:
       - ../db/migrations:/flyway/sql
-    command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=postgres", "-password=postgres", "migrate"]
+    command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=${POSTGRES_USER:-postgres}", "-password=${POSTGRES_PASSWORD:-postgres}", "migrate"]
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.143.1
+    image: otel/opentelemetry-collector-contrib:0.147.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector.yaml:/etc/otelcol/config.yaml
@@ -45,17 +45,17 @@ services:
       - "16686:16686"
 
   prometheus:
-    image: prom/prometheus:v3.9.0
+    image: prom/prometheus:v3.10.0
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "9090:9090"
 
   grafana:
-    image: grafana/grafana:12.3.1
+    image: grafana/grafana:12.4.1
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
     ports:
       - "3000:3000"
 
@@ -70,10 +70,10 @@ services:
         condition: service_started
     environment:
       - PORT=8080
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/timeledger?sslmode=disable
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - ADMIN_KEY=dev-admin-key
+      - ADMIN_KEY=${ADMIN_KEY:-dev-admin-key}
     ports:
       - "8080:8080"
 
@@ -88,9 +88,9 @@ services:
         condition: service_started
     environment:
       - PORT=8081
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/timeledger
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-      - ADMIN_KEY=dev-admin-key
+      - ADMIN_KEY=${ADMIN_KEY:-dev-admin-key}
     ports:
       - "8081:8081"

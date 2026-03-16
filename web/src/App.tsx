@@ -62,11 +62,14 @@ function clsStatus(s: string) {
   return "down";
 }
 
-function uuidv4() {
-  // good-enough for a sim; browsers also have crypto.randomUUID()
-  // eslint-disable-next-line
-  // @ts-ignore
-  return (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+function uuidv4(): string {
+  return crypto.randomUUID();
+}
+
+function secureRandomInt(max: number): number {
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return arr[0] % max;
 }
 
 export default function App() {
@@ -214,10 +217,10 @@ export default function App() {
     }
     autoRef.current = window.setInterval(() => {
       const z = selectedZoneId;
-      const from = `acct-${String.fromCharCode(65 + Math.floor(Math.random() * 6))}`;
-      const to = `acct-${String.fromCharCode(65 + Math.floor(Math.random() * 6))}`;
+      const from = `acct-${String.fromCharCode(65 + secureRandomInt(6))}`;
+      const to = `acct-${String.fromCharCode(65 + secureRandomInt(6))}`;
       if (from === to) return;
-      const amt = [30, 60, 120, 300, 600, 1200, 3600][Math.floor(Math.random() * 7)];
+      const amt = [30, 60, 120, 300, 600, 1200, 3600][secureRandomInt(7)];
       createTransfer(from, to, amt, z, { mode: "auto" }).catch(() => {});
     }, 1300);
     return () => { if (autoRef.current) window.clearInterval(autoRef.current); autoRef.current = null; };
