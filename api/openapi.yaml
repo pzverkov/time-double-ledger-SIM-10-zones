@@ -374,11 +374,9 @@ components:
       type: object
       properties:
         service: { type: string }
-        language: { type: string }
         version: { type: string }
-        revision: { type: string, nullable: true }
-        build_time: { type: string, nullable: true }
-      required: [service, language, version]
+      additionalProperties: true
+      required: [service, version]
 
     Zone:
       type: object
