@@ -1,6 +1,5 @@
 # Go
 go/cover.out
-go/go.sum
 
 # Rust
 rust/**/target/
