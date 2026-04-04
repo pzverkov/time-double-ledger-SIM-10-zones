@@ -1,4 +1,4 @@
-FROM rust:stable AS build
+FROM rust:1.93-bookworm AS build
 WORKDIR /src
 COPY Cargo.toml ./
 RUN mkdir -p src && echo 'fn main(){}' > src/main.rs
