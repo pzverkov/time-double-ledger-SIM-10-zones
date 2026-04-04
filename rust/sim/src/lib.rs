@@ -1,5 +1,6 @@
 pub mod error;
 pub mod handlers;
+pub mod messaging;
 pub mod middleware;
 pub mod state;
 pub mod util;
