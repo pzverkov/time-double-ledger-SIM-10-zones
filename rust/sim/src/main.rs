@@ -1,9 +1,11 @@
 use axum::{middleware, routing::{get, post}, Router};
 use std::{env, net::SocketAddr};
 use tokio_postgres::NoTls;
-use tracing::info;
+use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 use time_ledger_sim_rust::handlers::{admin, audit, balances, controls, incidents, spool, transactions, transfers, zones};
+use time_ledger_sim_rust::messaging;
 use time_ledger_sim_rust::middleware::cors;
 use time_ledger_sim_rust::state::{init_metrics, AppState};
 
@@ -34,6 +36,30 @@ async fn main() {
         .max_size(16)
         .build()
         .expect("pool build");
+
+    // NATS messaging (optional: skip if NATS_URL not set)
+    let cancel = CancellationToken::new();
+    if let Ok(nats_url) = env::var("NATS_URL") {
+        match async_nats::connect(&nats_url).await {
+            Ok(nc) => {
+                let js = async_nats::jetstream::new(nc);
+                if let Err(e) = messaging::streams::ensure_streams(&js).await {
+                    warn!(error = %e, "NATS stream setup failed, messaging disabled");
+                } else {
+                    info!("NATS connected, starting outbox publisher and fraud consumer");
+                    let outbox = messaging::outbox::OutboxPublisher::new(pool.clone(), js.clone());
+                    let fraud = messaging::fraud::FraudConsumer::new(pool.clone(), js);
+                    let c1 = cancel.clone();
+                    let c2 = cancel.clone();
+                    tokio::spawn(async move { outbox.run(c1).await });
+                    tokio::spawn(async move { fraud.run(c2).await });
+                }
+            }
+            Err(e) => warn!(error = %e, "NATS connection failed, messaging disabled"),
+        }
+    } else {
+        info!("NATS_URL not set, messaging disabled");
+    }
 
     let st = AppState {
         db: pool,
@@ -67,7 +93,13 @@ async fn main() {
 
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
     info!(%addr, "sim-rust listening");
-    axum::serve(tokio::net::TcpListener::bind(addr).await.unwrap(), app)
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            tokio::signal::ctrl_c().await.ok();
+            info!("shutting down");
+            cancel.cancel();
+        })
         .await
         .unwrap();
 }
