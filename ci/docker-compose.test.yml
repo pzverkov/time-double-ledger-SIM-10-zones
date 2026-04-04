@@ -1,0 +1,61 @@
+# Lightweight compose for contract testing in CI.
+# No observability stack (Jaeger, Prometheus, Grafana, OTel Collector).
+services:
+  postgres:
+    image: postgres:16.13
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: timeledger
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d timeledger"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  nats:
+    image: nats:2.12.5
+    command: ["-js"]
+
+  migrate:
+    image: flyway/flyway:11.20.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../db/migrations:/flyway/sql
+    command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=postgres", "-password=postgres", "migrate"]
+
+  sim-go:
+    build:
+      context: ../go
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      - PORT=8080
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger?sslmode=disable
+      - NATS_URL=nats://nats:4222
+      - ADMIN_KEY=test-admin-key
+    ports:
+      - "8080:8080"
+
+  sim-rust:
+    build:
+      context: ../rust/sim
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+    environment:
+      - PORT=8081
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger
+      - NATS_URL=nats://nats:4222
+      - ADMIN_KEY=test-admin-key
+    ports:
+      - "8081:8081"

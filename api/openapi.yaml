@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Time Ledger Sim
-  version: 0.1.0
+  version: 0.3.0
 servers:
   - url: http://localhost:8080
 
@@ -33,9 +33,13 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Zone"
+                type: object
+                properties:
+                  zones:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Zone"
+                required: [zones]
 
   /v1/zones/{zone_id}/status:
     post:
@@ -100,9 +104,13 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/BalanceRow"
+                type: object
+                properties:
+                  balances:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BalanceRow"
+                required: [balances]
 
   /v1/transactions:
     get:
@@ -118,9 +126,13 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/TransactionRow"
+                type: object
+                properties:
+                  transactions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TransactionRow"
+                required: [transactions]
 
   /v1/transactions/{transaction_id}:
     get:
@@ -158,9 +170,13 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/IncidentSummary"
+                type: object
+                properties:
+                  incidents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IncidentSummary"
+                required: [incidents]
 
   /v1/incidents:
     get:
@@ -176,9 +192,13 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/IncidentSummary"
+                type: object
+                properties:
+                  incidents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/IncidentSummary"
+                required: [incidents]
 
   /v1/incidents/{incident_id}:
     get:
@@ -312,9 +332,13 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/AuditEntry"
+                type: object
+                properties:
+                  audit:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AuditEntry"
+                required: [audit]
 
   /v1/sim/snapshot:
     post:
@@ -325,9 +349,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Snapshot"
-        "401":
-          description: Unauthorized
+                type: object
+        "403":
+          description: Forbidden
 
   /v1/sim/restore:
     post:
@@ -337,12 +361,12 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Snapshot"
+              type: object
       responses:
         "200":
           description: OK
-        "401":
-          description: Unauthorized
+        "403":
+          description: Forbidden
 
 components:
   schemas:
@@ -352,12 +376,9 @@ components:
         service: { type: string }
         language: { type: string }
         version: { type: string }
-        revision: { type: string }
-        build_time: { type: string }
-        modified: { type: boolean }
-        go_version: { type: string }
-        platform: { type: string }
-      required: [service, language, version, go_version, platform]
+        revision: { type: string, nullable: true }
+        build_time: { type: string, nullable: true }
+      required: [service, language, version]
 
     Zone:
       type: object
@@ -374,7 +395,7 @@ components:
         status: { type: string, enum: [OK, DEGRADED, DOWN] }
         actor: { type: string }
         reason: { type: string }
-      required: [status]
+      required: [status, actor]
 
     TransferRequest:
       type: object
@@ -382,7 +403,7 @@ components:
         request_id: { type: string }
         from_account: { type: string }
         to_account: { type: string }
-        amount_units: { type: integer, format: int64 }
+        amount_units: { type: integer, format: int64, minimum: 1 }
         zone_id: { type: string }
         metadata: { type: object }
       required: [request_id, from_account, to_account, amount_units, zone_id]
@@ -392,7 +413,9 @@ components:
       properties:
         status: { type: string, enum: [APPLIED] }
         transaction_id: { type: string }
-      required: [status, transaction_id]
+        request_id: { type: string }
+        created_at: { type: string }
+      required: [status, transaction_id, request_id, created_at]
 
     TransferSpooledResponse:
       type: object
@@ -414,6 +437,7 @@ components:
       type: object
       properties:
         id: { type: string }
+        request_id: { type: string }
         from_account: { type: string }
         to_account: { type: string }
         amount_units: { type: integer, format: int64 }
@@ -433,6 +457,7 @@ components:
       type: object
       properties:
         id: { type: string }
+        request_id: { type: string }
         from_account: { type: string }
         to_account: { type: string }
         amount_units: { type: integer, format: int64 }
@@ -452,16 +477,21 @@ components:
         severity: { type: string, enum: [INFO, WARN, CRITICAL] }
         status: { type: string }
         title: { type: string }
+        details: { type: object }
         detected_at: { type: string }
       required: [id, zone_id, severity, title, detected_at]
 
     IncidentDetail:
-      allOf:
-        - $ref: "#/components/schemas/IncidentSummary"
-        - type: object
-          properties:
-            details: { type: object }
-            txn_id: { type: string }
+      type: object
+      properties:
+        id: { type: string }
+        zone_id: { type: string }
+        severity: { type: string, enum: [INFO, WARN, CRITICAL] }
+        status: { type: string }
+        title: { type: string }
+        details: { type: object }
+        detected_at: { type: string }
+      required: [id, zone_id, severity, title, detected_at]
 
     IncidentActionRequest:
       type: object
@@ -470,7 +500,8 @@ components:
         assignee: { type: string }
         note: { type: string }
         actor: { type: string }
-      required: [action]
+        reason: { type: string }
+      required: [action, actor]
 
     ZoneControls:
       type: object
@@ -510,47 +541,20 @@ components:
     ReplayResult:
       type: object
       properties:
-        attempted: { type: integer }
+        zone_id: { type: string }
         applied: { type: integer }
         failed: { type: integer }
+      required: [applied, failed]
 
     AuditEntry:
       type: object
       properties:
         id: { type: string }
-        zone_id: { type: string }
-        entity_type: { type: string }
-        entity_id: { type: string }
-        action: { type: string }
         actor: { type: string }
-        reason: { type: string }
+        action: { type: string }
+        target_type: { type: string }
+        target_id: { type: string }
+        reason: { type: string, nullable: true }
         details: { type: object }
         created_at: { type: string }
-      required: [id, action, created_at]
-
-    Snapshot:
-      type: object
-      properties:
-        exported_at: { type: string }
-        zones:
-          type: array
-          items: { $ref: "#/components/schemas/Zone" }
-        controls:
-          type: array
-          items: { $ref: "#/components/schemas/ZoneControls" }
-        balances:
-          type: array
-          items: { $ref: "#/components/schemas/BalanceRow" }
-        transactions:
-          type: array
-          items: { $ref: "#/components/schemas/TransactionDetail" }
-        incidents:
-          type: array
-          items: { $ref: "#/components/schemas/IncidentDetail" }
-        spooled_transfers:
-          type: array
-          items: { type: object }
-        audit:
-          type: array
-          items: { $ref: "#/components/schemas/AuditEntry" }
-      required: [exported_at]
+      required: [id, actor, action, created_at]
