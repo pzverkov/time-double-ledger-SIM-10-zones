@@ -209,3 +209,21 @@ button,input,select,textarea{ font: inherit; color: inherit; }
 }
 .toast .t{ font-weight: 700; font-size: 13px; }
 .toast .m{ color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+.conn-banner{
+  text-align:center;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+.conn-banner.offline{
+  background: rgba(239,68,68,.12);
+  color: var(--bad);
+  border-bottom-color: rgba(239,68,68,.3);
+}
+.conn-banner.loading{
+  background: rgba(96,165,250,.10);
+  color: var(--accent);
+  border-bottom-color: rgba(96,165,250,.3);
+}
