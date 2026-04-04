@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-05
+
+### Added
+- Rust backend: full feature parity with Go (zone controls, spool, audit, incident actions, NATS messaging)
+- Rust backend: modular architecture (12 source files mirroring Go's internal/ layout)
+- Rust backend: structured JSON error responses via AppError enum
+- Rust backend: NATS JetStream outbox publisher and fraud consumer with graceful shutdown
+- Rust backend: full snapshot/restore parity (zones, controls, accounts, incidents, spool, audit)
+- Schemathesis contract tests in CI validating both backends against OpenAPI spec
+- CI test compose (ci/docker-compose.test.yml) for lightweight contract testing
+- Comprehensive unit tests: 25 tests across Go (10) and Rust (15)
+- Cross-language FNV-1a 32-bit parity tests anchoring deterministic throttle behavior
+- AppError tests verifying all HTTP status codes and JSON response bodies
+- Committed go.sum (removed from .gitignore)
+
+### Changed
+- Rust main.rs reduced from 674 lines to 65 lines (modular extraction)
+- Rust transfer path: zone gating with controls check, deterministic throttle, spool support
+- Rust transfers return 202 + SpooledResponse when zone is blocked and spool enabled
+- OpenAPI spec updated to v0.3.0: fixed envelope wrapping, required fields, VersionInfo schema
+- Go Dockerfile now copies go.sum for reproducible builds
+- Rust Dockerfile pinned to rust:1.93-bookworm (replaced unstable rust:stable tag)
+
+### Fixed
+- FNV hash cross-language parity bug: Rust was using 64-bit FNV (fnv crate) instead of 32-bit FNV-1a matching Go. Replaced with manual implementation. Without this fix, deterministic throttling would produce different results between backends.
+- tokio-util and futures incorrectly placed in dev-dependencies instead of dependencies
+
+### Removed
+- fnv crate dependency (replaced with manual FNV-1a 32-bit for Go parity)
+
 ## [0.2.0] - 2026-04-04
 
 ### Added
