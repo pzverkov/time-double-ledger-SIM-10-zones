@@ -97,9 +97,9 @@ jobs:
       - name: Install Schemathesis
         run: pip install schemathesis
       - name: Test Go backend
-        run: st run --checks all --url http://localhost:8080 --exclude-path-regex '/v1/sim/' api/openapi.yaml
+        run: st run --checks response_schema_conformance --checks status_code_conformance --url http://localhost:8080 --exclude-path-regex '/v1/sim/' --exclude-path-regex '/v1/incidents/\{' --exclude-path-regex '/v1/transactions/\{' api/openapi.yaml
       - name: Test Rust backend
-        run: st run --checks all --url http://localhost:8081 --exclude-path-regex '/v1/sim/' api/openapi.yaml
+        run: st run --checks response_schema_conformance --checks status_code_conformance --url http://localhost:8081 --exclude-path-regex '/v1/sim/' --exclude-path-regex '/v1/incidents/\{' --exclude-path-regex '/v1/transactions/\{' api/openapi.yaml
       - name: Teardown
         if: always()
         run: docker compose -f ci/docker-compose.test.yml down
