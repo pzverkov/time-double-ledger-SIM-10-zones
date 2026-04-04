@@ -1,6 +1,9 @@
 pub mod admin;
+pub mod audit;
 pub mod balances;
+pub mod controls;
 pub mod incidents;
+pub mod spool;
 pub mod transactions;
 pub mod transfers;
 pub mod zones;
