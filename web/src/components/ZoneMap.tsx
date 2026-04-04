@@ -10,7 +10,8 @@ type Props = {
 };
 
 function statusColor(status?: string) {
-  const s = (status || "DOWN").toUpperCase();
+  if (!status) return "rgba(107,114,128,.7)";
+  const s = status.toUpperCase();
   if (s === "OK") return "rgba(34,197,94,.9)";
   if (s === "DEGRADED") return "rgba(245,158,11,.92)";
   return "rgba(239,68,68,.92)";

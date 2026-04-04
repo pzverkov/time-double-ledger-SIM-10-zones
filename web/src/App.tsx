@@ -89,6 +89,9 @@ export default function App() {
   const [balances, setBalances] = useState<Balance[]>([]);
   const [txns, setTxns] = useState<Txn[]>([]);
 
+  const [connStatus, setConnStatus] = useState<"loading" | "connected" | "offline">("loading");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
   const [busy, setBusy] = useState(false);
   const [toasts, setToasts] = useState<ToastMsg[]>([]);
   const [modal, setModal] = useState<{ title: string; body: any } | null>(null);
@@ -117,14 +120,21 @@ export default function App() {
   }
 
   async function refreshAll() {
-    await Promise.all([
-        loadVersion(),
-        loadZones(),
+    const results = await Promise.allSettled([
+      loadVersion(),
+      loadZones(),
       loadBalances(),
       loadTxns(),
       loadAllIncidents(),
       loadZoneDrilldown(selectedZoneId),
     ]);
+    const allFailed = results.every(r => r.status === "rejected");
+    if (allFailed) {
+      setConnStatus("offline");
+    } else {
+      setConnStatus("connected");
+      setLastUpdated(new Date());
+    }
   }
 
   async function loadVersion() {
@@ -190,16 +200,7 @@ export default function App() {
   }, [apiBase]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        setBusy(true);
-        await refreshAll();
-      } catch (e: any) {
-        toast("Failed to load", String(e?.message || e));
-      } finally {
-        setBusy(false);
-      }
-    })();
+    refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -208,6 +209,21 @@ export default function App() {
     loadZoneDrilldown(selectedZoneId).catch((e: any) => toast("Zone drilldown failed", String(e?.message || e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedZoneId]);
+
+  useEffect(() => {
+    let id: number;
+    function schedule() {
+      id = window.setTimeout(async () => {
+        if (!document.hidden) {
+          await refreshAll().catch(() => {});
+        }
+        schedule();
+      }, connStatus === "offline" ? 5000 : 10000);
+    }
+    schedule();
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connStatus, selectedZoneId]);
 
   useEffect(() => {
     if (!autoTraffic) {
@@ -457,6 +473,12 @@ export default function App() {
 
             <button className="btn primary" disabled={busy} onClick={() => refreshAll().catch(() => {})}>Refresh</button>
 
+            {lastUpdated && connStatus === "connected" && (
+              <span className="small" style={{ whiteSpace: "nowrap" }}>
+                Updated {lastUpdated.toLocaleTimeString()}
+              </span>
+            )}
+
             <label className="pill" style={{ gap: 8 }}>
               <input type="checkbox" checked={autoTraffic} onChange={(e) => setAutoTraffic(e.target.checked)} />
               <span className="small">Auto traffic</span>
@@ -464,6 +486,17 @@ export default function App() {
           </div>
         </div>
       </div>
+
+      {connStatus === "offline" && (
+        <div className="conn-banner offline">
+          Backend unreachable. Last data: {lastUpdated ? lastUpdated.toLocaleTimeString() : "never"}. Retrying automatically...
+        </div>
+      )}
+      {connStatus === "loading" && (
+        <div className="conn-banner loading">
+          Connecting to backend...
+        </div>
+      )}
 
       <div className="container">
         <div className="grid">
