@@ -3,7 +3,7 @@ use std::{env, net::SocketAddr};
 use tokio_postgres::NoTls;
 use tracing::info;
 
-use time_ledger_sim_rust::handlers::{admin, balances, incidents, transactions, transfers, zones};
+use time_ledger_sim_rust::handlers::{admin, audit, balances, controls, incidents, spool, transactions, transfers, zones};
 use time_ledger_sim_rust::middleware::cors;
 use time_ledger_sim_rust::state::{init_metrics, AppState};
 
@@ -53,7 +53,13 @@ async fn main() {
         .route("/v1/transactions/{transaction_id}", get(transactions::get_transaction))
         .route("/v1/zones/{zone_id}/status", post(zones::set_zone_status))
         .route("/v1/zones/{zone_id}/incidents", get(incidents::list_incidents_by_zone))
+        .route("/v1/incidents", get(incidents::list_recent_incidents))
         .route("/v1/incidents/{incident_id}", get(incidents::get_incident))
+        .route("/v1/incidents/{incident_id}/action", post(incidents::apply_incident_action))
+        .route("/v1/zones/{zone_id}/controls", get(controls::get_zone_controls).post(controls::set_zone_controls))
+        .route("/v1/zones/{zone_id}/spool", get(spool::get_spool_stats))
+        .route("/v1/zones/{zone_id}/spool/replay", post(spool::replay_spool))
+        .route("/v1/zones/{zone_id}/audit", get(audit::list_audit))
         .route("/v1/sim/snapshot", post(admin::snapshot))
         .route("/v1/sim/restore", post(admin::restore))
         .layer(middleware::from_fn(cors))
