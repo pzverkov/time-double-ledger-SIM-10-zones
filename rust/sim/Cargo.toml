@@ -1,7 +1,7 @@
 [package]
 name = "time-ledger-sim-rust"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 axum = "0.8.8"
@@ -13,12 +13,11 @@ deadpool-postgres = "0.14"
 time = { version = "0.3.47", features = ["serde", "formatting"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
-async-nats = "0.46.0"
+async-nats = "0.47.0"
 opentelemetry = "0.31.0"
 opentelemetry-otlp = { version = "0.31.0", features = ["http-proto", "reqwest-client"] }
 opentelemetry_sdk = "0.31.0"
 tracing-opentelemetry = "0.32.1"
 prometheus = "0.14.0"
-lazy_static = "1.5"
 sha2 = "0.11"
 hex = "0.4"
