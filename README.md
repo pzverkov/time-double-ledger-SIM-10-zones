@@ -85,19 +85,27 @@ curl -s -X POST http://localhost:8080/v1/zones/zone-eu/status \
   -d '{"status":"DOWN","actor":"operator@example","reason":"simulated outage"}' | jq .
 ```
 
-## Tests & coverage
+## Task runner
 
-### Go
+This project uses [`just`](https://github.com/casey/just) as the polyglot task runner.
+
 ```bash
-cd go
-go test ./... -coverprofile=cover.out
-go tool cover -func=cover.out
+brew install just    # macOS
+just                 # list all recipes
 ```
 
-### Rust
+Common recipes:
+
 ```bash
-cd rust/sim
-cargo test
+just test            # run all tests (Go + Rust + web)
+just test-go         # Go tests only
+just test-rust       # Rust tests only
+just cover-go        # Go tests with coverage
+just lint            # lint Go + Rust
+just infra-up        # start Docker Compose dev stack
+just infra-down      # stop it
+just dev-web         # start Vite dev server
+just lockfiles       # regenerate all lockfiles
 ```
 
 (Repo includes unit tests for hashing, idempotency conflict handling, and ledger invariants.)
