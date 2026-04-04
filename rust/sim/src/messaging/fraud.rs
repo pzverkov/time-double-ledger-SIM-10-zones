@@ -35,22 +35,30 @@ impl FraudConsumer {
         };
 
         loop {
-            tokio::select! {
-                _ = cancel.cancelled() => return,
-                result = consumer.fetch().max_messages(10).expires(Duration::from_secs(1)).messages() => {
-                    match result {
-                        Ok(mut msgs) => {
-                            use futures::StreamExt;
-                            while let Some(Ok(msg)) = msgs.next().await {
-                                let _ = self.handle_msg(&msg).await;
-                                let _ = msg.ack().await;
-                            }
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "fraud fetch failed");
-                            tokio::time::sleep(Duration::from_secs(1)).await;
+            if cancel.is_cancelled() {
+                return;
+            }
+
+            let batch = consumer
+                .fetch()
+                .max_messages(10)
+                .expires(Duration::from_secs(1))
+                .messages()
+                .await;
+
+            match batch {
+                Ok(mut msgs) => {
+                    use futures::StreamExt;
+                    while let Some(msg_result) = msgs.next().await {
+                        if let Ok(msg) = msg_result {
+                            let _ = self.handle_msg(&msg).await;
+                            let _ = msg.ack().await;
                         }
                     }
+                }
+                Err(e) => {
+                    warn!(error = %e, "fraud fetch failed");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         }
