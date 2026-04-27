@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-28
+
+### Changed
+- Routine dependency maintenance across Go, Rust, and web stacks; brought transitive and direct dependencies up to current patch versions.
+
+### Bumped
+- Go: `pgx/v5` 5.8.0 to 5.9.2, `nats.go` 1.50.0 to 1.51.0, `otel` and `otel/sdk` 1.42.0 to 1.43.0, `otel/exporters/otlp/otlptrace/otlptracehttp` 1.42.0 to 1.43.0
+- Rust: `tokio` 1.50.0 to 1.52.1, `axum` 0.8.8 to 0.8.9, `rand` and `rustls-webpki` to current patch versions
+- Web: `react` and `react-dom` 19.2.4 to 19.2.5, `vite` 7.3.1 to 7.3.2, `typescript` 5.9.3 to 6.0.3, `postcss` 8.5.8 to 8.5.12
+- CI: `actions/upload-pages-artifact` v4 to v5
+
 ## [0.3.0] - 2026-04-05
 
 ### Added
