@@ -15,7 +15,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
 async-nats = "0.47.0"
 opentelemetry = "0.31.0"
-opentelemetry-otlp = { version = "0.31.0", features = ["http-proto", "reqwest-client"] }
+opentelemetry-otlp = { version = "0.32.0", features = ["http-proto", "reqwest-client"] }
 opentelemetry_sdk = "0.31.0"
 tracing-opentelemetry = "0.32.1"
 prometheus = "0.14.0"
