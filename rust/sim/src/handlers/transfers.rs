@@ -13,8 +13,14 @@ pub struct CreateTransferRequest {
     pub to_account: String,
     pub amount_units: i64,
     pub zone_id: String,
-    #[serde(default)]
+    #[serde(default = "default_metadata")]
     pub metadata: serde_json::Value,
+}
+
+/// Omitted metadata is an empty object, not JSON null, so it matches the
+/// `metadata: object` response schema and the column's `'{}'` default.
+fn default_metadata() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 #[derive(Serialize)]
