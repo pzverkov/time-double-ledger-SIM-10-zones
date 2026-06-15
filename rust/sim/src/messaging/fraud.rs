@@ -1,129 +1,127 @@
-use async_nats::jetstream;
-use deadpool_postgres::Pool;
-use serde::Deserialize;
-use std::time::Duration;
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use async_trait::async_trait;
+use std::sync::Arc;
 
-use super::streams::STREAM_NAME;
+use super::broker::{BrokerError, EventHandler, IncomingEvent};
+use super::store::{fraud_verdict, FraudStore, Incident, TransferPosted};
 
-pub struct FraudConsumer {
-    db: Pool,
-    js: jetstream::Context,
+pub const CONSUMER: &str = "fraud-v1";
+
+/// Flags large time transfers as incidents. Idempotent via inbox dedup.
+pub struct FraudHandler {
+    store: Arc<dyn FraudStore>,
 }
 
-#[derive(Deserialize)]
-struct TransferPosted {
-    event_id: Option<String>,
-    transaction_id: Option<String>,
-    zone_id: Option<String>,
-    amount_units: Option<i64>,
+impl FraudHandler {
+    pub fn new(store: Arc<dyn FraudStore>) -> Self {
+        Self { store }
+    }
 }
 
-impl FraudConsumer {
-    pub fn new(db: Pool, js: jetstream::Context) -> Self {
-        Self { db, js }
-    }
-
-    pub async fn run(&self, cancel: CancellationToken) {
-        let consumer = match self.create_consumer().await {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(error = %e, "fraud consumer setup failed, skipping");
-                return;
-            }
-        };
-
-        loop {
-            if cancel.is_cancelled() {
-                return;
-            }
-
-            let batch = consumer
-                .fetch()
-                .max_messages(10)
-                .expires(Duration::from_secs(1))
-                .messages()
-                .await;
-
-            match batch {
-                Ok(mut msgs) => {
-                    use futures::StreamExt;
-                    while let Some(msg_result) = msgs.next().await {
-                        if let Ok(msg) = msg_result {
-                            let _ = self.handle_msg(&msg).await;
-                            let _ = msg.ack().await;
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(error = %e, "fraud fetch failed");
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        }
-    }
-
-    async fn create_consumer(
-        &self,
-    ) -> Result<jetstream::consumer::PullConsumer, async_nats::Error> {
-        let stream = self.js.get_stream(STREAM_NAME).await?;
-        let consumer = stream
-            .get_or_create_consumer(
-                "fraud-v1",
-                jetstream::consumer::pull::Config {
-                    durable_name: Some("fraud-v1".into()),
-                    filter_subject: "events.transfer_posted".into(),
-                    ..Default::default()
-                },
-            )
-            .await?;
-        Ok(consumer)
-    }
-
-    async fn handle_msg(
-        &self,
-        msg: &async_nats::jetstream::message::Message,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let ev: TransferPosted = serde_json::from_slice(&msg.payload)?;
-
-        let event_id = ev
-            .event_id
-            .or_else(|| {
-                msg.headers
-                    .as_ref()
-                    .and_then(|h| h.get("Nats-Msg-Id"))
-                    .map(|v| v.to_string())
-            })
-            .unwrap_or_default();
-
+#[async_trait]
+impl EventHandler for FraudHandler {
+    async fn handle(&self, event: &IncomingEvent) -> Result<(), BrokerError> {
+        let ev: TransferPosted = serde_json::from_slice(&event.payload)?;
+        let event_id = ev.event_id.clone().or_else(|| event.msg_id.clone()).unwrap_or_default();
         if event_id.is_empty() {
             return Ok(());
         }
 
-        let client = self.db.get().await?;
+        let incident = fraud_verdict(ev.amount_units).then(|| Incident {
+            zone_id: ev.zone_id.unwrap_or_default(),
+            txn_id: ev.transaction_id.unwrap_or_default(),
+            amount_units: ev.amount_units.unwrap_or(0),
+        });
 
-        // inbox dedup
-        client
-            .execute(
-                "INSERT INTO inbox_events(consumer,event_id) VALUES('fraud-v1',$1::uuid) ON CONFLICT DO NOTHING",
-                &[&event_id],
-            )
-            .await?;
-
-        // fraud rule: large transfer (>= 1 hour in seconds)
-        if ev.amount_units.unwrap_or(0) >= 3600 {
-            let zone_id = ev.zone_id.unwrap_or_default();
-            let txn_id = ev.transaction_id.unwrap_or_default();
-            let amount = ev.amount_units.unwrap_or(0);
-            client
-                .execute(
-                    "INSERT INTO incidents(zone_id, related_txn_id, severity, title, details) VALUES($1, $2::uuid, 'WARN', 'Large time transfer', jsonb_build_object('amount_units',$3,'rule','large_transfer'))",
-                    &[&zone_id, &txn_id, &amount],
-                )
-                .await?;
-        }
-
+        // Claim + write are atomic in the store; a duplicate returns false (no-op).
+        self.store.record_fraud(&event_id, incident.as_ref()).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeFraudStore {
+        seen: Mutex<HashSet<String>>,
+        incidents: Mutex<Vec<Incident>>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl FraudStore for FakeFraudStore {
+        async fn record_fraud(&self, event_id: &str, incident: Option<&Incident>) -> Result<bool, BrokerError> {
+            if self.fail {
+                return Err("store boom".into());
+            }
+            if !self.seen.lock().unwrap().insert(event_id.to_string()) {
+                return Ok(false); // duplicate
+            }
+            if let Some(inc) = incident {
+                self.incidents.lock().unwrap().push(inc.clone());
+            }
+            Ok(true)
+        }
+    }
+
+    fn event(event_id: &str, zone: &str, amount: i64) -> IncomingEvent {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "event_id": event_id,
+            "transaction_id": "11111111-1111-1111-1111-111111111111",
+            "zone_id": zone,
+            "amount_units": amount,
+        }))
+        .unwrap();
+        IncomingEvent { msg_id: Some(event_id.to_string()), payload: body }
+    }
+
+    #[tokio::test]
+    async fn large_transfer_records_one_incident() {
+        let store = Arc::new(FakeFraudStore::default());
+        let h = FraudHandler::new(store.clone());
+        h.handle(&event("e1", "zone-eu", 5000)).await.unwrap();
+        let inc = store.incidents.lock().unwrap();
+        assert_eq!(inc.len(), 1);
+        assert_eq!(inc[0].amount_units, 5000);
+        assert_eq!(inc[0].zone_id, "zone-eu");
+    }
+
+    #[tokio::test]
+    async fn small_transfer_records_no_incident_but_claims() {
+        let store = Arc::new(FakeFraudStore::default());
+        let h = FraudHandler::new(store.clone());
+        h.handle(&event("e1", "zone-eu", 100)).await.unwrap();
+        assert_eq!(store.incidents.lock().unwrap().len(), 0);
+        assert!(store.seen.lock().unwrap().contains("e1")); // still deduped
+    }
+
+    #[tokio::test]
+    async fn duplicate_delivery_is_idempotent() {
+        let store = Arc::new(FakeFraudStore::default());
+        let h = FraudHandler::new(store.clone());
+        h.handle(&event("e1", "zone-eu", 5000)).await.unwrap();
+        h.handle(&event("e1", "zone-eu", 5000)).await.unwrap(); // redelivery
+        assert_eq!(store.incidents.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn store_error_propagates_for_redelivery() {
+        let store = Arc::new(FakeFraudStore { fail: true, ..Default::default() });
+        let h = FraudHandler::new(store);
+        let err = h.handle(&event("e1", "zone-eu", 5000)).await;
+        assert!(err.is_err()); // consumer will not ack -> redelivered
+    }
+
+    #[tokio::test]
+    async fn missing_event_id_is_dropped() {
+        let store = Arc::new(FakeFraudStore::default());
+        let h = FraudHandler::new(store.clone());
+        let body = serde_json::to_vec(&serde_json::json!({"amount_units": 5000})).unwrap();
+        h.handle(&IncomingEvent { msg_id: None, payload: body }).await.unwrap();
+        assert_eq!(store.incidents.lock().unwrap().len(), 0);
+        assert!(store.seen.lock().unwrap().is_empty());
     }
 }

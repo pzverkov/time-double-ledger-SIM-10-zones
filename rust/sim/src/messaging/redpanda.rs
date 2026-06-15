@@ -1,0 +1,178 @@
+//! Kafka-API (Redpanda) implementation of the broker traits, behind the
+//! `redpanda` feature. NATS stays the default; this exists to prove the broker
+//! seam is real and to back the NATS-vs-Redpanda benchmark.
+//!
+//! Idempotency note: Kafka has no built-in publish dedup like NATS `Nats-Msg-Id`.
+//! Correctness here relies entirely on the inbox table (`record_fraud` /
+//! `record_stats` claim atomically), which is exactly why that pattern is
+//! broker-agnostic and already in place.
+
+use async_trait::async_trait;
+use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka::client::DefaultClientContext;
+use rdkafka::config::ClientConfig;
+use rdkafka::consumer::{CommitMode, Consumer, StreamConsumer};
+use rdkafka::producer::{FutureProducer, FutureRecord};
+use rdkafka::{Offset, TopicPartitionList};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
+use tracing::warn;
+
+use super::broker::{
+    BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, SUBJECT_TRANSFER_POSTED,
+    MAX_DELIVER,
+};
+use super::{analytics, fraud};
+
+type Publisher = Arc<dyn EventPublisher>;
+type ConsumerArc = Arc<dyn EventConsumer>;
+
+/// A subject maps 1:1 to a Kafka topic name (dots are valid in Kafka topics).
+pub fn subject_to_topic(subject: &str) -> &str {
+    subject
+}
+
+/// Build a publisher and the two consumer groups against `brokers`.
+pub async fn build(brokers: &str) -> Result<(Publisher, ConsumerArc, ConsumerArc), BrokerError> {
+    let topic = subject_to_topic(SUBJECT_TRANSFER_POSTED).to_string();
+    ensure_topic(brokers, &topic).await?;
+
+    let publisher: Publisher = Arc::new(RedpandaPublisher::new(brokers)?);
+    let fraud_c: ConsumerArc =
+        Arc::new(RedpandaConsumer::new(brokers, fraud::CONSUMER, &topic)?);
+    let analytics_c: ConsumerArc =
+        Arc::new(RedpandaConsumer::new(brokers, analytics::CONSUMER, &topic)?);
+    Ok((publisher, fraud_c, analytics_c))
+}
+
+async fn ensure_topic(brokers: &str, topic: &str) -> Result<(), BrokerError> {
+    let admin: AdminClient<DefaultClientContext> =
+        ClientConfig::new().set("bootstrap.servers", brokers).create()?;
+    let new = NewTopic::new(topic, 1, TopicReplication::Fixed(1));
+    // Ignore "already exists"; surface anything else.
+    let res = admin.create_topics([&new], &AdminOptions::new()).await?;
+    for r in res {
+        if let Err((name, err)) = r
+            && !format!("{err:?}").contains("TopicAlreadyExists")
+        {
+            warn!(topic = %name, error = ?err, "create_topics returned error");
+        }
+    }
+    Ok(())
+}
+
+pub struct RedpandaPublisher {
+    producer: FutureProducer,
+}
+
+impl RedpandaPublisher {
+    pub fn new(brokers: &str) -> Result<Self, BrokerError> {
+        let producer = ClientConfig::new()
+            .set("bootstrap.servers", brokers)
+            .set("message.timeout.ms", "5000")
+            .create()?;
+        Ok(Self { producer })
+    }
+}
+
+#[async_trait]
+impl EventPublisher for RedpandaPublisher {
+    async fn publish(&self, subject: &str, msg_id: &str, body: Vec<u8>) -> Result<(), BrokerError> {
+        let topic = subject_to_topic(subject);
+        let record = FutureRecord::to(topic).key(msg_id).payload(&body);
+        self.producer
+            .send(record, Duration::from_secs(5))
+            .await
+            .map_err(|(e, _)| Box::new(e) as BrokerError)?;
+        Ok(())
+    }
+}
+
+pub struct RedpandaConsumer {
+    consumer: StreamConsumer,
+    topic: String,
+}
+
+impl RedpandaConsumer {
+    pub fn new(brokers: &str, group_id: &str, topic: &str) -> Result<Self, BrokerError> {
+        let consumer: StreamConsumer = ClientConfig::new()
+            .set("bootstrap.servers", brokers)
+            .set("group.id", group_id)
+            .set("enable.auto.commit", "false")
+            .set("auto.offset.reset", "earliest")
+            .create()?;
+        consumer.subscribe(&[topic])?;
+        Ok(Self { consumer, topic: topic.to_string() })
+    }
+
+    fn commit_offset(&self, partition: i32, offset: i64) -> Result<(), BrokerError> {
+        let mut tpl = TopicPartitionList::new();
+        tpl.add_partition_offset(&self.topic, partition, Offset::Offset(offset + 1))?;
+        self.consumer.commit(&tpl, CommitMode::Sync)?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl EventConsumer for RedpandaConsumer {
+    async fn run(&self, handler: Arc<dyn EventHandler>, cancel: CancellationToken) {
+        use rdkafka::message::Message;
+        // Bound reprocessing of a poison message at one offset.
+        let mut last_offset: i64 = -1;
+        let mut attempts: i64 = 0;
+        loop {
+            let msg = tokio::select! {
+                _ = cancel.cancelled() => return,
+                r = self.consumer.recv() => match r {
+                    Ok(m) => m.detach(),
+                    Err(e) => {
+                        warn!(error = %e, "redpanda recv failed");
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        continue;
+                    }
+                }
+            };
+
+            let partition = msg.partition();
+            let offset = msg.offset();
+            let event = IncomingEvent {
+                msg_id: msg.key().map(|k| String::from_utf8_lossy(k).into_owned()),
+                payload: msg.payload().map(|p| p.to_vec()).unwrap_or_default(),
+            };
+
+            match handler.handle(&event).await {
+                Ok(()) => {
+                    if let Err(e) = self.commit_offset(partition, offset) {
+                        warn!(error = %e, "commit failed");
+                    }
+                    last_offset = -1;
+                    attempts = 0;
+                }
+                Err(e) => {
+                    attempts = if offset == last_offset { attempts + 1 } else { 1 };
+                    last_offset = offset;
+                    if attempts >= MAX_DELIVER {
+                        warn!(error = %e, offset, attempts, "poison message, committing to drop");
+                        let _ = self.commit_offset(partition, offset);
+                        last_offset = -1;
+                        attempts = 0;
+                    } else {
+                        warn!(error = %e, offset, attempts, "handler failed, seeking back to reprocess");
+                        let _ = self.consumer.seek(&self.topic, partition, Offset::Offset(offset), Duration::from_secs(5));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subject_maps_to_topic_identity() {
+        assert_eq!(subject_to_topic("events.transfer_posted"), "events.transfer_posted");
+    }
+}

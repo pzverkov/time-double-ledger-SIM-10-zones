@@ -11,12 +11,17 @@ pub struct AppState {
 
 pub struct Metrics {
     pub transfers_total: prometheus::IntCounter,
+    /// Unpublished outbox rows: the pipeline backlog SLI. Rising = consumers/publisher behind.
+    pub outbox_backlog: prometheus::IntGauge,
 }
 
 pub fn init_metrics() -> (Arc<prometheus::Registry>, Arc<Metrics>) {
     let reg = prometheus::Registry::new();
     let transfers_total =
         prometheus::IntCounter::new("transfers_total", "Transfers created").unwrap();
+    let outbox_backlog =
+        prometheus::IntGauge::new("outbox_backlog", "Unpublished outbox rows").unwrap();
     reg.register(Box::new(transfers_total.clone())).unwrap();
-    (Arc::new(reg), Arc::new(Metrics { transfers_total }))
+    reg.register(Box::new(outbox_backlog.clone())).unwrap();
+    (Arc::new(reg), Arc::new(Metrics { transfers_total, outbox_backlog }))
 }

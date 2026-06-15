@@ -1,13 +1,77 @@
 use axum::{middleware, routing::{get, post}, Router};
+use std::sync::Arc;
 use std::{env, net::SocketAddr};
 use tokio_postgres::NoTls;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use time_ledger_sim_rust::handlers::{admin, audit, balances, controls, incidents, spool, transactions, transfers, zones};
-use time_ledger_sim_rust::messaging;
+use time_ledger_sim_rust::messaging::broker::{EventConsumer, EventHandler, EventPublisher, SUBJECT_TRANSFER_POSTED};
+use time_ledger_sim_rust::messaging::store::PgStore;
+use time_ledger_sim_rust::messaging::{analytics, fraud, nats, outbox};
 use time_ledger_sim_rust::middleware::cors;
 use time_ledger_sim_rust::state::{init_metrics, AppState};
+
+type Publisher = Arc<dyn EventPublisher>;
+type Consumer = Arc<dyn EventConsumer>;
+
+/// Build a publisher and the per-group consumers for the selected broker.
+/// Returns None when messaging is disabled or setup fails (the API still runs).
+async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)> {
+    match broker {
+        "nats" => {
+            let nats_url = match env::var("NATS_URL") {
+                Ok(u) => u,
+                Err(_) => {
+                    info!("NATS_URL not set, messaging disabled");
+                    return None;
+                }
+            };
+            let nc = match async_nats::connect(&nats_url).await {
+                Ok(nc) => nc,
+                Err(e) => {
+                    warn!(error = %e, "NATS connection failed, messaging disabled");
+                    return None;
+                }
+            };
+            let js = async_nats::jetstream::new(nc);
+            if let Err(e) = nats::ensure_streams(&js).await {
+                warn!(error = %e, "NATS stream setup failed, messaging disabled");
+                return None;
+            }
+            info!("NATS connected, starting outbox publisher and consumers");
+            let publisher: Publisher = Arc::new(nats::NatsPublisher::new(js.clone()));
+            let fraud_c: Consumer = Arc::new(nats::NatsConsumer::new(js.clone(), fraud::CONSUMER, SUBJECT_TRANSFER_POSTED));
+            let analytics_c: Consumer = Arc::new(nats::NatsConsumer::new(js, analytics::CONSUMER, SUBJECT_TRANSFER_POSTED));
+            Some((publisher, fraud_c, analytics_c))
+        }
+        #[cfg(feature = "redpanda")]
+        "redpanda" => {
+            use time_ledger_sim_rust::messaging::redpanda;
+            let brokers = match env::var("REDPANDA_BROKERS") {
+                Ok(b) => b,
+                Err(_) => {
+                    info!("REDPANDA_BROKERS not set, messaging disabled");
+                    return None;
+                }
+            };
+            match redpanda::build(&brokers).await {
+                Ok((publisher, fraud_c, analytics_c)) => {
+                    info!("Redpanda connected, starting outbox publisher and consumers");
+                    Some((publisher, fraud_c, analytics_c))
+                }
+                Err(e) => {
+                    warn!(error = %e, "Redpanda setup failed, messaging disabled");
+                    None
+                }
+            }
+        }
+        other => {
+            warn!(broker = %other, "unknown or uncompiled EVENT_BROKER, messaging disabled");
+            None
+        }
+    }
+}
 
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -37,28 +101,39 @@ async fn main() {
         .build()
         .expect("pool build");
 
-    // NATS messaging (optional: skip if NATS_URL not set)
+    // Messaging (optional: disabled if the broker is unset/unreachable).
     let cancel = CancellationToken::new();
-    if let Ok(nats_url) = env::var("NATS_URL") {
-        match async_nats::connect(&nats_url).await {
-            Ok(nc) => {
-                let js = async_nats::jetstream::new(nc);
-                if let Err(e) = messaging::streams::ensure_streams(&js).await {
-                    warn!(error = %e, "NATS stream setup failed, messaging disabled");
-                } else {
-                    info!("NATS connected, starting outbox publisher and fraud consumer");
-                    let outbox = messaging::outbox::OutboxPublisher::new(pool.clone(), js.clone());
-                    let fraud = messaging::fraud::FraudConsumer::new(pool.clone(), js);
-                    let c1 = cancel.clone();
-                    let c2 = cancel.clone();
-                    tokio::spawn(async move { outbox.run(c1).await });
-                    tokio::spawn(async move { fraud.run(c2).await });
+    let broker = env::var("EVENT_BROKER").unwrap_or_else(|_| "nats".into());
+    if let Some((publisher, fraud_c, analytics_c)) = build_messaging(&broker).await {
+        let store = Arc::new(PgStore::new(pool.clone()));
+        let outbox = outbox::OutboxPublisher::new(store.clone(), publisher);
+        let fraud_handler: Arc<dyn EventHandler> = Arc::new(fraud::FraudHandler::new(store.clone()));
+        let analytics_handler: Arc<dyn EventHandler> = Arc::new(analytics::AnalyticsHandler::new(store));
+        let (c1, c2, c3) = (cancel.clone(), cancel.clone(), cancel.clone());
+        tokio::spawn(async move { outbox.run(c1).await });
+        tokio::spawn(async move { fraud_c.run(fraud_handler, c2).await });
+        tokio::spawn(async move { analytics_c.run(analytics_handler, c3).await });
+
+        // Pipeline backlog SLI: poll unpublished outbox rows into a gauge.
+        let backlog = metrics_state.outbox_backlog.clone();
+        let backlog_pool = pool.clone();
+        let c4 = cancel.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            loop {
+                tokio::select! {
+                    _ = c4.cancelled() => return,
+                    _ = interval.tick() => {
+                        if let Ok(client) = backlog_pool.get().await
+                            && let Ok(row) = client.query_one("SELECT count(*) FROM outbox_events WHERE published_at IS NULL", &[]).await
+                        {
+                            let n: i64 = row.get(0);
+                            backlog.set(n);
+                        }
+                    }
                 }
             }
-            Err(e) => warn!(error = %e, "NATS connection failed, messaging disabled"),
-        }
-    } else {
-        info!("NATS_URL not set, messaging disabled");
+        });
     }
 
     let st = AppState {
