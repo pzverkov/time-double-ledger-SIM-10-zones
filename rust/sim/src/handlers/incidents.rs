@@ -67,7 +67,7 @@ pub async fn get_incident(
     let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let row = client
         .query_one(
-            "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::uuid",
+            "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::text::uuid",
             &[&incident_id],
         )
         .await
@@ -110,7 +110,7 @@ pub async fn apply_incident_action(
     // fetch current incident
     let current = tx
         .query_one(
-            "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::uuid",
+            "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::text::uuid",
             &[&incident_id],
         )
         .await
@@ -147,14 +147,14 @@ pub async fn apply_incident_action(
     let details_str = serde_json::to_string(&details).unwrap();
     let updated = tx
         .query_one(
-            "UPDATE incidents SET status=$2, details=$3::jsonb WHERE id=$1::uuid RETURNING id::text, zone_id, severity, status, title, details, detected_at",
+            "UPDATE incidents SET status=$2, details=$3::jsonb WHERE id=$1::text::uuid RETURNING id::text, zone_id, severity, status, title, details, detected_at",
             &[&incident_id, &new_status, &details_str],
         )
         .await?;
 
     let audit_action = format!("INCIDENT_{}", req.action);
     tx.execute(
-        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,$2,'incident',$3,$4, jsonb_build_object('assignee',$5,'note',$6,'status',$7))",
+        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,$2,'incident',$3,$4, jsonb_build_object('assignee',$5::text,'note',$6::text,'status',$7::text))",
         &[&req.actor, &audit_action, &incident_id, &req.reason, &req.assignee, &req.note, &new_status],
     ).await?;
 

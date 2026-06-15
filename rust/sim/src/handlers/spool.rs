@@ -109,7 +109,7 @@ pub async fn replay_spool(
                 applied += 1;
                 let _ = client
                     .execute(
-                        "UPDATE spooled_transfers SET status='APPLIED', updated_at=now(), applied_at=now(), fail_reason=NULL WHERE id=$1::uuid",
+                        "UPDATE spooled_transfers SET status='APPLIED', updated_at=now(), applied_at=now(), fail_reason=NULL WHERE id=$1::text::uuid",
                         &[&spool_id],
                     )
                     .await;
@@ -119,7 +119,7 @@ pub async fn replay_spool(
                 let reason = format!("{e:?}");
                 let _ = client
                     .execute(
-                        "UPDATE spooled_transfers SET status='FAILED', updated_at=now(), fail_reason=$2 WHERE id=$1::uuid",
+                        "UPDATE spooled_transfers SET status='FAILED', updated_at=now(), fail_reason=$2 WHERE id=$1::text::uuid",
                         &[&spool_id, &reason],
                     )
                     .await;
@@ -130,7 +130,7 @@ pub async fn replay_spool(
     // audit summary
     let _ = client
         .execute(
-            "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'REPLAY_SPOOL','zone',$2,$3, jsonb_build_object('applied',$4,'failed',$5,'limit',$6))",
+            "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'REPLAY_SPOOL','zone',$2,$3, jsonb_build_object('applied',$4::bigint,'failed',$5::bigint,'limit',$6::bigint))",
             &[&req.actor, &zone_id, &req.reason, &applied, &failed, &limit],
         )
         .await;
