@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Rust backend: swappable messaging broker behind `EventPublisher`/`EventConsumer`/`EventHandler` traits with `OutboxStore`/`FraudStore`/`AnalyticsStore` DB ports; `EVENT_BROKER` selects NATS JetStream (default) or Redpanda
+- Rust backend: Redpanda (Kafka API) implementation behind the `redpanda` cargo feature
+- Rust backend: analytics consumer group (`zone_event_stats`) demonstrating fan-out alongside the fraud consumer
+- Rust backend: explicit at-least-once redelivery (ack on success, redeliver on error bounded by `max_deliver`, logged poison drop)
+- `outbox_backlog` Prometheus gauge as the pipeline backlog SLI
+- Failure-path unit tests (dedup, error redelivery, partial publish failure, fan-out) and `cargo bench` micro-benchmarks
+- e2e and load tooling: `scripts/e2e/transfers_e2e.sh`, `scripts/load/transfers.k6.js`, `scripts/load/pipeline_lag.sh`; ADR 0001 and `docs/benchmarks.md`
+
 ## [0.3.1] - 2026-04-28
 
 ### Changed

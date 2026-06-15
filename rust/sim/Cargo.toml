@@ -23,6 +23,17 @@ sha2 = "0.11"
 hex = "0.4"
 tokio-util = { version = "0.7", features = ["rt"] }
 futures = "0.3"
+async-trait = "0.1"
+rdkafka = { version = "0.37", features = ["tokio"], optional = true }
+
+[features]
+default = []
+redpanda = ["dep:rdkafka"]
 
 [dev-dependencies]
 http-body-util = "0.1"
+criterion = "0.5"
+
+[[bench]]
+name = "messaging"
+harness = false
