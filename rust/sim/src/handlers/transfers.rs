@@ -186,7 +186,7 @@ async fn apply_transfer_inner(
     let created_at: time::OffsetDateTime = row.get(1);
 
     tx.execute(
-        "INSERT INTO postings(txn_id,account_id,direction,amount_units) VALUES($1::uuid,$2,'DEBIT',$3),($1::uuid,$4,'CREDIT',$3)",
+        "INSERT INTO postings(txn_id,account_id,direction,amount_units) VALUES($1::text::uuid,$2,'DEBIT',$3),($1::text::uuid,$4,'CREDIT',$3)",
         &[&txn_id, &from_account, &amount_units, &to_account],
     ).await?;
 

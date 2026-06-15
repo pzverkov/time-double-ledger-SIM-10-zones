@@ -9,7 +9,9 @@ RUN if [ "$REDPANDA" = "1" ]; then \
       rm -rf /var/lib/apt/lists/*; \
     fi
 COPY Cargo.toml ./
-RUN mkdir -p src && echo 'fn main(){}' > src/main.rs
+# Stub the bin and the declared bench target so the dependency-cache build can
+# resolve all manifest targets before the real sources are copied.
+RUN mkdir -p src benches && echo 'fn main(){}' > src/main.rs && echo 'fn main(){}' > benches/messaging.rs
 RUN if [ "$REDPANDA" = "1" ]; then cargo build --release --features redpanda; else cargo build --release; fi
 COPY . .
 RUN if [ "$REDPANDA" = "1" ]; then cargo build --release --features redpanda; else cargo build --release; fi

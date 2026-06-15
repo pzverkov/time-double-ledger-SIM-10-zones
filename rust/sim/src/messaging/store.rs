@@ -107,7 +107,7 @@ impl OutboxStore for PgStore {
     async fn mark_published(&self, id: &str) -> Result<(), BrokerError> {
         let client = self.db.get().await?;
         client
-            .execute("UPDATE outbox_events SET published_at=now() WHERE id=$1::uuid", &[&id])
+            .execute("UPDATE outbox_events SET published_at=now() WHERE id=$1::text::uuid", &[&id])
             .await?;
         Ok(())
     }
@@ -120,7 +120,7 @@ impl FraudStore for PgStore {
         let tx = client.transaction().await?;
         let claimed = tx
             .execute(
-                "INSERT INTO inbox_events(consumer,event_id) VALUES('fraud-v1',$1::uuid) ON CONFLICT DO NOTHING",
+                "INSERT INTO inbox_events(consumer,event_id) VALUES('fraud-v1',$1::text::uuid) ON CONFLICT DO NOTHING",
                 &[&event_id],
             )
             .await?;
@@ -130,7 +130,7 @@ impl FraudStore for PgStore {
         }
         if let Some(inc) = incident {
             tx.execute(
-                "INSERT INTO incidents(zone_id, related_txn_id, severity, title, details) VALUES($1, $2::uuid, 'WARN', 'Large time transfer', jsonb_build_object('amount_units',$3,'rule','large_transfer'))",
+                "INSERT INTO incidents(zone_id, related_txn_id, severity, title, details) VALUES($1, $2::text::uuid, 'WARN', 'Large time transfer', jsonb_build_object('amount_units',$3::bigint,'rule','large_transfer'))",
                 &[&inc.zone_id, &inc.txn_id, &inc.amount_units],
             )
             .await?;
@@ -147,7 +147,7 @@ impl AnalyticsStore for PgStore {
         let tx = client.transaction().await?;
         let claimed = tx
             .execute(
-                "INSERT INTO inbox_events(consumer,event_id) VALUES('analytics-v1',$1::uuid) ON CONFLICT DO NOTHING",
+                "INSERT INTO inbox_events(consumer,event_id) VALUES('analytics-v1',$1::text::uuid) ON CONFLICT DO NOTHING",
                 &[&event_id],
             )
             .await?;

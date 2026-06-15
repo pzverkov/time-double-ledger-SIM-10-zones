@@ -13,7 +13,7 @@ const BASE_URL = __ENV.BASE_URL || "http://localhost:8081";
 const RATE = parseInt(__ENV.RATE || "200", 10);
 const DURATION = __ENV.DURATION || "30s";
 const LARGE_PCT = parseInt(__ENV.LARGE_PCT || "10", 10);
-const ZONES = ["zone-na", "zone-sa", "zone-eu", "zone-af", "zone-as"];
+const ZONES = ["zone-na", "zone-sa", "zone-eu", "zone-af", "zone-ap"];
 
 export const options = {
   scenarios: {
