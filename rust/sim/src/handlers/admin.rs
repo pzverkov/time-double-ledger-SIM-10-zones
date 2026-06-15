@@ -195,7 +195,7 @@ pub async fn restore(
             let details = i.get("details").unwrap_or(&serde_json::Value::Null);
             let details_str = serde_json::to_string(details).unwrap_or_default();
             if let Some(r) = rel {
-                tx.execute("INSERT INTO incidents(zone_id,related_txn_id,severity,status,title,details) VALUES($1,$2::uuid,$3,$4,$5,$6::jsonb)", &[&zid, &r, &sev, &st, &title, &details_str]).await?;
+                tx.execute("INSERT INTO incidents(zone_id,related_txn_id,severity,status,title,details) VALUES($1,$2::text::uuid,$3,$4,$5,$6::jsonb)", &[&zid, &r, &sev, &st, &title, &details_str]).await?;
             } else {
                 tx.execute("INSERT INTO incidents(zone_id,severity,status,title,details) VALUES($1,$2,$3,$4,$5::jsonb)", &[&zid, &sev, &st, &title, &details_str]).await?;
             }
