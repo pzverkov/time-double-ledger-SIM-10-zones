@@ -24,7 +24,9 @@ services:
         condition: service_healthy
     volumes:
       - ../db/migrations:/flyway/sql
-    command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=postgres", "-password=postgres", "migrate"]
+    # Migrations are named NNNN_desc.sql (not Flyway's default V<n>__desc), so
+    # set an empty prefix and single-underscore separator.
+    command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=postgres", "-password=postgres", "-sqlMigrationPrefix=", "-sqlMigrationSeparator=_", "migrate"]
 
   sim-go:
     build:
