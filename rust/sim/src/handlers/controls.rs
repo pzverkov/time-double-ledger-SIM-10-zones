@@ -96,7 +96,7 @@ pub async fn set_zone_controls(
         .await?;
 
     tx.execute(
-        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_CONTROLS','zone',$2,$3, jsonb_build_object('writes_blocked',$4,'cross_zone_throttle',$5,'spool_enabled',$6))",
+        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_CONTROLS','zone',$2,$3, jsonb_build_object('writes_blocked',$4::bool,'cross_zone_throttle',$5::int,'spool_enabled',$6::bool))",
         &[&req.actor, &zone_id, &req.reason, &wb, &throttle, &spool],
     )
     .await?;
@@ -105,7 +105,7 @@ pub async fn set_zone_controls(
         let sev = if wb { "CRITICAL" } else { "WARN" };
         let title = if wb { "Writes blocked by operator" } else { "Zone controls tightened" };
         tx.execute(
-            "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,$2,$3, jsonb_build_object('reason',$4,'actor',$5,'writes_blocked',$6,'cross_zone_throttle',$7,'spool_enabled',$8))",
+            "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,$2,$3, jsonb_build_object('reason',$4::text,'actor',$5::text,'writes_blocked',$6::bool,'cross_zone_throttle',$7::int,'spool_enabled',$8::bool))",
             &[&zone_id, &sev, &title, &req.reason, &req.actor, &wb, &throttle, &spool],
         )
         .await?;

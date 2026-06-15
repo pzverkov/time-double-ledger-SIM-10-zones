@@ -67,7 +67,7 @@ pub async fn set_zone_status(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     tx.execute(
-        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4))",
+        "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4::text))",
         &[&req.actor, &zone_id, &req.reason, &req.status],
     )
     .await
@@ -75,7 +75,7 @@ pub async fn set_zone_status(
 
     if req.status == "DOWN" {
         tx.execute(
-            "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2,'actor',$3))",
+            "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2::text,'actor',$3::text))",
             &[&zone_id, &req.reason, &req.actor],
         )
         .await
