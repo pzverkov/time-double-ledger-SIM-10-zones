@@ -115,7 +115,7 @@ pub async fn create_transfer(
             let spool_id: String = spool_row.get(0);
 
             tx.execute(
-                "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES('system','SPOOL_TRANSFER','zone',$1,$2, jsonb_build_object('request_id',$3,'spool_id',$4))",
+                "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES('system','SPOOL_TRANSFER','zone',$1,$2, jsonb_build_object('request_id',$3::text,'spool_id',$4::text))",
                 &[&req.zone_id, &reason, &req.request_id, &spool_id],
             ).await?;
 
