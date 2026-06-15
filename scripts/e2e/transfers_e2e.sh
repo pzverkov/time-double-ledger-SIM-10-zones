@@ -37,7 +37,7 @@ wait_for() { # <description> <sql returning a count> <expected>
     if [ "$got" = "$want" ]; then echo "ok: $desc ($got)"; return 0; fi
     sleep 0.5
   done
-  echo "FAIL: $desc — got '$got', want '$want'" >&2
+  echo "FAIL: $desc - got '$got', want '$want'" >&2
   exit 1
 }
 
