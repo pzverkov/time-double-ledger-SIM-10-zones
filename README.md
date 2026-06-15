@@ -6,7 +6,7 @@ A production-flavored simulation backend for a "time-currency" double-entry ledg
 - Zone controls: writes blocking, cross-zone throttle (0-100%), spool-and-replay
 - Fraud/ops incidents per zone with ACK/ASSIGN/RESOLVE lifecycle
 - Deterministic throttling via FNV-1a hashing (cross-language parity between Go and Rust)
-- **At-least-once** messaging with NATS JetStream + **Transactional Outbox** + **Inbox dedup**
+- **At-least-once** messaging with **Transactional Outbox** + **Inbox dedup**, behind a swappable broker seam (NATS JetStream default, Redpanda/Kafka-API via `--features redpanda`); two consumer groups (fraud + analytics). See [ADR 0001](docs/adr/0001-messaging-broker.md)
 - Observability: structured logs, Prometheus metrics, OpenTelemetry traces (Jaeger)
 
 Two interchangeable backends with full feature parity:
@@ -48,6 +48,19 @@ Endpoints:
 - Jaeger: http://localhost:16686
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000 (admin/admin)
+
+### Messaging broker
+
+NATS JetStream is the default. To run the Rust backend on the Kafka API (Redpanda)
+instead:
+
+```bash
+cd infra && docker compose --profile redpanda up -d --build   # app on :8082
+```
+
+This builds the image with `--features redpanda` and sets `EVENT_BROKER=redpanda`.
+Rationale and the NATS-vs-Redpanda comparison: [ADR 0001](docs/adr/0001-messaging-broker.md)
+and [docs/benchmarks.md](docs/benchmarks.md).
 
 ## Task runner
 

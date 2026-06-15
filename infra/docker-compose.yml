@@ -89,8 +89,49 @@ services:
     environment:
       - PORT=8081
       - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/timeledger
+      - EVENT_BROKER=nats
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - ADMIN_KEY=${ADMIN_KEY:-dev-admin-key}
     ports:
       - "8081:8081"
+
+  # Kafka-API alternative, off by default. Run with: docker compose --profile redpanda up
+  redpanda:
+    image: redpandadata/redpanda:v24.3.1
+    profiles: ["redpanda"]
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"
+
+  sim-rust-redpanda:
+    profiles: ["redpanda"]
+    build:
+      context: ../rust/sim
+      dockerfile: Dockerfile
+      args:
+        REDPANDA: "1"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_started
+    environment:
+      - PORT=8081
+      - DATABASE_URL=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/timeledger
+      - EVENT_BROKER=redpanda
+      - REDPANDA_BROKERS=redpanda:9092
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - ADMIN_KEY=${ADMIN_KEY:-dev-admin-key}
+    ports:
+      - "8082:8081"
