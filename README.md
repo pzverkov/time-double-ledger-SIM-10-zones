@@ -51,8 +51,8 @@ Endpoints:
 
 ### Messaging broker
 
-NATS JetStream is the default. To run the Rust backend on the Kafka API (Redpanda)
-instead:
+NATS JetStream is the default. To run the Rust backend against Redpanda (a
+Kafka-API broker; the same path works with Apache Kafka) instead:
 
 ```bash
 cd infra && docker compose --profile redpanda up -d --build   # app on :8082
@@ -112,9 +112,17 @@ just test            # unit tests (Go + Rust)
 just lint            # clippy + go vet
 ```
 
+## Documentation
+
+- [Architecture](docs/architecture.md) - components and the event pipeline
+- [Go vs Rust parity](docs/parity-matrix.md)
+- [Messaging ADR](docs/adr/0001-messaging-broker.md) and [benchmarks](docs/benchmarks.md)
+- [Contributing](CONTRIBUTING.md) - setup, tasks, conventions
+- [Security policy](SECURITY.md)
+
 ## Security
 
-CI includes CodeQL, govulncheck, cargo-audit, npm audit, and Schemathesis contract tests. See `docs/security-scanning.md` and `docs/threat-model.md`.
+CI includes CodeQL, govulncheck, cargo-audit, npm audit, and Schemathesis contract tests. See [SECURITY.md](SECURITY.md), `docs/security-scanning.md`, and `docs/threat-model.md`.
 
 ## Disclaimer
 
