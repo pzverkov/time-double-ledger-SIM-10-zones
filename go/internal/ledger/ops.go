@@ -309,9 +309,10 @@ func (l *Ledger) ApplyIncidentAction(ctx context.Context, incidentID string, in 
 	detailsBytes, _ := json.Marshal(d)
 
 	newStatus := inc.Status
-	if in.Action == "ACK" {
+	switch in.Action {
+	case "ACK":
 		newStatus = "ACK"
-	} else if in.Action == "RESOLVE" {
+	case "RESOLVE":
 		newStatus = "RESOLVED"
 	}
 
