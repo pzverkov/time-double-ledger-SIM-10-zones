@@ -103,11 +103,32 @@ jobs:
     needs: [go, rust]
     steps:
       - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Build sim-go image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./go
+          file: ./go/Dockerfile
+          tags: ci-sim-go:test
+          load: true
+          cache-from: type=gha,scope=sim-go
+          cache-to: type=gha,mode=max,scope=sim-go
+      - name: Build sim-rust image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./rust/sim
+          file: ./rust/sim/Dockerfile
+          tags: ci-sim-rust:test
+          load: true
+          cache-from: type=gha,scope=sim-rust
+          cache-to: type=gha,mode=max,scope=sim-rust
       - name: Start test infra
-        # Retry to absorb transient Docker Hub image-pull timeouts on the runner.
+        # Backend images are prebuilt above with GHA layer cache; --no-build reuses
+        # them. Retry absorbs transient Docker Hub pull timeouts for the base images
+        # (postgres/nats/flyway) on the runner.
         run: |
           n=0
-          until docker compose -f ci/docker-compose.test.yml up -d --build --wait --wait-timeout 120; do
+          until docker compose -f ci/docker-compose.test.yml up -d --no-build --wait --wait-timeout 120; do
             n=$((n + 1))
             if [ "$n" -ge 3 ]; then echo "infra failed to start after $n attempts"; exit 1; fi
             echo "infra start attempt $n failed (likely a registry pull timeout), retrying in 15s..."
@@ -132,6 +153,11 @@ jobs:
       - name: Dump backend logs on failure
         if: failure()
         run: docker compose -f ci/docker-compose.test.yml logs --tail=200 sim-rust sim-go nats
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-schemathesis-4.21.8
       - name: Install Schemathesis
         # Pinned: an unpinned install drifts versions across runs (non-reproducible).
         run: pip install schemathesis==4.21.8
