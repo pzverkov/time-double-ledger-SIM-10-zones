@@ -32,7 +32,9 @@ post_transfer() {
 
 wait_for() { # <description> <sql returning a count> <expected>
   local desc="$1" sql="$2" want="$3" got
-  for _ in $(seq 1 40); do
+  # Generous window: messaging connects in the background and the dual-backend CI
+  # stack shares one broker, so first delivery can lag on a contended runner.
+  for _ in $(seq 1 120); do
     got="$(psql_q "$sql")"
     if [ "$got" = "$want" ]; then echo "ok: $desc ($got)"; return 0; fi
     sleep 0.5
@@ -40,6 +42,13 @@ wait_for() { # <description> <sql returning a count> <expected>
   echo "FAIL: $desc - got '$got', want '$want'" >&2
   exit 1
 }
+
+# Wait for the backend to report readiness (DB reachable) before driving it.
+echo "waiting for $BASE_URL/readyz"
+for _ in $(seq 1 60); do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/readyz")" = "200" ] && break
+  sleep 1
+done
 
 echo "posting transfer $REQ_ID (amount 5000, $ZONE)"
 TXN_ID="$(post_transfer | python3 -c 'import sys,json;print(json.load(sys.stdin)["transaction_id"])')"
