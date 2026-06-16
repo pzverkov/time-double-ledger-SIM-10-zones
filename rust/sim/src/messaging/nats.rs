@@ -61,7 +61,11 @@ pub struct NatsConsumer {
 }
 
 impl NatsConsumer {
-    pub fn new(js: jetstream::Context, durable: impl Into<String>, filter_subject: impl Into<String>) -> Self {
+    pub fn new(
+        js: jetstream::Context,
+        durable: impl Into<String>,
+        filter_subject: impl Into<String>,
+    ) -> Self {
         Self {
             js,
             durable: durable.into(),
@@ -69,7 +73,9 @@ impl NatsConsumer {
         }
     }
 
-    async fn create_consumer(&self) -> Result<jetstream::consumer::PullConsumer, async_nats::Error> {
+    async fn create_consumer(
+        &self,
+    ) -> Result<jetstream::consumer::PullConsumer, async_nats::Error> {
         let stream = self.js.get_stream(STREAM_NAME).await?;
         let consumer = stream
             .get_or_create_consumer(
@@ -127,10 +133,7 @@ impl EventConsumer for NatsConsumer {
                             Err(e) => {
                                 // Leave un-acked: JetStream redelivers up to MAX_DELIVER,
                                 // then drops. Never silent.
-                                let delivered = msg
-                                    .info()
-                                    .map(|i| i.delivered)
-                                    .unwrap_or(0);
+                                let delivered = msg.info().map(|i| i.delivered).unwrap_or(0);
                                 warn!(
                                     error = %e,
                                     durable = %self.durable,
@@ -139,7 +142,9 @@ impl EventConsumer for NatsConsumer {
                                 );
                                 // Nak with a short delay so a persistently-failing
                                 // handler backs off instead of hot-looping to max_deliver.
-                                let _ = msg.ack_with(jetstream::AckKind::Nak(Some(Duration::from_secs(1)))).await;
+                                let _ = msg
+                                    .ack_with(jetstream::AckKind::Nak(Some(Duration::from_secs(1))))
+                                    .await;
                             }
                         }
                     }

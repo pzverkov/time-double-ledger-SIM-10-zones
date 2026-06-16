@@ -20,7 +20,12 @@ struct Log(LogEntries);
 
 #[async_trait]
 impl EventPublisher for Log {
-    async fn publish(&self, _subject: &str, msg_id: &str, body: Vec<u8>) -> Result<(), BrokerError> {
+    async fn publish(
+        &self,
+        _subject: &str,
+        msg_id: &str,
+        body: Vec<u8>,
+    ) -> Result<(), BrokerError> {
         self.0.lock().unwrap().push((msg_id.to_string(), body));
         Ok(())
     }
@@ -45,7 +50,10 @@ impl EventConsumer for GroupConsumer {
             match item {
                 None => tokio::time::sleep(Duration::from_millis(2)).await,
                 Some((msg_id, payload)) => {
-                    let ev = IncomingEvent { msg_id: Some(msg_id), payload };
+                    let ev = IncomingEvent {
+                        msg_id: Some(msg_id),
+                        payload,
+                    };
                     match handler.handle(&ev).await {
                         Ok(()) => {
                             idx += 1;
@@ -106,14 +114,23 @@ async fn one_event_fans_out_to_two_consumer_groups() {
 
     let c1 = GroupConsumer { log: log.clone() };
     let c2 = GroupConsumer { log: log.clone() };
-    let h1: Arc<dyn EventHandler> = Arc::new(CountingHandler { calls: fraud_calls.clone(), fail_first: 0 });
-    let h2: Arc<dyn EventHandler> = Arc::new(CountingHandler { calls: analytics_calls.clone(), fail_first: 0 });
+    let h1: Arc<dyn EventHandler> = Arc::new(CountingHandler {
+        calls: fraud_calls.clone(),
+        fail_first: 0,
+    });
+    let h2: Arc<dyn EventHandler> = Arc::new(CountingHandler {
+        calls: analytics_calls.clone(),
+        fail_first: 0,
+    });
 
     let (cc1, cc2) = (cancel.clone(), cancel.clone());
     let t1 = tokio::spawn(async move { c1.run(h1, cc1).await });
     let t2 = tokio::spawn(async move { c2.run(h2, cc2).await });
 
-    wait_until(500, || *fraud_calls.lock().unwrap() == 1 && *analytics_calls.lock().unwrap() == 1).await;
+    wait_until(500, || {
+        *fraud_calls.lock().unwrap() == 1 && *analytics_calls.lock().unwrap() == 1
+    })
+    .await;
     cancel.cancel();
     let _ = tokio::join!(t1, t2);
 
@@ -130,7 +147,10 @@ async fn handler_error_triggers_redelivery() {
     let cancel = CancellationToken::new();
     let c = GroupConsumer { log: log.clone() };
     // fail once, then succeed: handler must be invoked at least twice.
-    let h: Arc<dyn EventHandler> = Arc::new(CountingHandler { calls: calls.clone(), fail_first: 1 });
+    let h: Arc<dyn EventHandler> = Arc::new(CountingHandler {
+        calls: calls.clone(),
+        fail_first: 1,
+    });
 
     let cc = cancel.clone();
     let t = tokio::spawn(async move { c.run(h, cc).await });
@@ -139,5 +159,8 @@ async fn handler_error_triggers_redelivery() {
     cancel.cancel();
     let _ = t.await;
 
-    assert!(*calls.lock().unwrap() >= 2, "expected redelivery after error");
+    assert!(
+        *calls.lock().unwrap() >= 2,
+        "expected redelivery after error"
+    );
 }

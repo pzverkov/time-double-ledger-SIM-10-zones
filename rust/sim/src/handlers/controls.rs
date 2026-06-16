@@ -1,4 +1,7 @@
-use axum::{extract::{Path, State}, Json};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
@@ -39,7 +42,10 @@ pub async fn get_zone_controls(
 
     // lazy-init default row
     client
-        .execute("INSERT INTO zone_controls(zone_id) VALUES($1) ON CONFLICT DO NOTHING", &[&zone_id])
+        .execute(
+            "INSERT INTO zone_controls(zone_id) VALUES($1) ON CONFLICT DO NOTHING",
+            &[&zone_id],
+        )
         .await?;
 
     let r = client
@@ -79,14 +85,20 @@ pub async fn set_zone_controls(
     let spool = req.spool_enabled.unwrap_or(false);
 
     if !(0..=100).contains(&throttle) {
-        return Err(AppError::BadRequest("cross_zone_throttle must be 0-100".into()));
+        return Err(AppError::BadRequest(
+            "cross_zone_throttle must be 0-100".into(),
+        ));
     }
 
     let mut client = st.db.get().await?;
     let tx = client.transaction().await?;
 
     // ensure row exists
-    tx.execute("INSERT INTO zone_controls(zone_id) VALUES($1) ON CONFLICT DO NOTHING", &[&zone_id]).await?;
+    tx.execute(
+        "INSERT INTO zone_controls(zone_id) VALUES($1) ON CONFLICT DO NOTHING",
+        &[&zone_id],
+    )
+    .await?;
 
     let r = tx
         .query_one(
@@ -103,7 +115,11 @@ pub async fn set_zone_controls(
 
     if wb || throttle == 0 {
         let sev = if wb { "CRITICAL" } else { "WARN" };
-        let title = if wb { "Writes blocked by operator" } else { "Zone controls tightened" };
+        let title = if wb {
+            "Writes blocked by operator"
+        } else {
+            "Zone controls tightened"
+        };
         tx.execute(
             "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,$2,$3, jsonb_build_object('reason',$4::text,'actor',$5::text,'writes_blocked',$6::bool,'cross_zone_throttle',$7::int,'spool_enabled',$8::bool))",
             &[&zone_id, &sev, &title, &req.reason, &req.actor, &wb, &throttle, &spool],

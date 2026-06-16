@@ -1,4 +1,8 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -14,9 +18,16 @@ struct Zone {
 }
 
 pub async fn list_zones(State(st): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
-    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client = st
+        .db
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let rows = client
-        .query("SELECT id,name,status,updated_at FROM zones ORDER BY id", &[])
+        .query(
+            "SELECT id,name,status,updated_at FROM zones ORDER BY id",
+            &[],
+        )
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -55,8 +66,15 @@ pub async fn set_zone_status(
     if req.status != "OK" && req.status != "DEGRADED" && req.status != "DOWN" {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let mut client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let tx = client.transaction().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut client = st
+        .db
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tx = client
+        .transaction()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let row = tx
         .query_one(
@@ -82,7 +100,9 @@ pub async fn set_zone_status(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
-    tx.commit().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let id: String = row.get("id");
     let name: String = row.get("name");
