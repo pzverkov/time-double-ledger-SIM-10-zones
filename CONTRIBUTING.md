@@ -37,7 +37,7 @@ just dev-web    # Vite dev server
 - **ASCII only** in all tracked files. No curly quotes, em/en dashes, or other
   Unicode (use `->`, `"`, `...`). A local pre-commit-style guard can enforce this.
 - **Formatting/lint are gated in CI**: `cargo fmt --check`, `cargo clippy --all-targets --features redpanda -- -D warnings`,
-  `gofmt`, `go vet`. Run `just lint` before pushing.
+  `gofmt -s`, `go vet`, and `golangci-lint`. Run `just lint` before pushing.
 - The API contract is `api/openapi.yaml`; both backends must conform (CI runs
   Schemathesis against it).
 - Keep changes small and focused; split refactors from feature work.
