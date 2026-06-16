@@ -34,7 +34,15 @@ async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)
                     return None;
                 }
             };
-            let nc = match async_nats::connect(&nats_url).await {
+            // Retry the initial connect so a broker that is briefly unavailable at
+            // startup (a common compose/orchestration race) does not permanently
+            // disable messaging. This runs in a background task, so waiting here
+            // never blocks the API from serving.
+            let nc = match async_nats::ConnectOptions::new()
+                .retry_on_initial_connect()
+                .connect(&nats_url)
+                .await
+            {
                 Ok(nc) => nc,
                 Err(e) => {
                     warn!(error = %e, "NATS connection failed, messaging disabled");
@@ -123,40 +131,49 @@ async fn main() {
         .build()
         .expect("pool build");
 
-    // Messaging (optional: disabled if the broker is unset/unreachable).
+    // Messaging (optional: disabled only if the broker is unset). The whole
+    // bring-up runs in a background task so the API serves immediately and a
+    // broker that is slow or briefly unavailable at startup does not block the
+    // server or permanently disable messaging (the connect retries).
     let cancel = CancellationToken::new();
-    let broker = env::var("EVENT_BROKER").unwrap_or_else(|_| "nats".into());
-    if let Some((publisher, fraud_c, analytics_c)) = build_messaging(&broker).await {
-        let store = Arc::new(PgStore::new(pool.clone()));
-        let outbox = outbox::OutboxPublisher::new(store.clone(), publisher);
-        let fraud_handler: Arc<dyn EventHandler> =
-            Arc::new(fraud::FraudHandler::new(store.clone()));
-        let analytics_handler: Arc<dyn EventHandler> =
-            Arc::new(analytics::AnalyticsHandler::new(store));
-        let (c1, c2, c3) = (cancel.clone(), cancel.clone(), cancel.clone());
-        tokio::spawn(async move { outbox.run(c1).await });
-        tokio::spawn(async move { fraud_c.run(fraud_handler, c2).await });
-        tokio::spawn(async move { analytics_c.run(analytics_handler, c3).await });
-
-        // Pipeline backlog SLI: poll unpublished outbox rows into a gauge.
+    {
+        let broker = env::var("EVENT_BROKER").unwrap_or_else(|_| "nats".into());
+        let pool = pool.clone();
+        let cancel = cancel.clone();
         let backlog = metrics_state.outbox_backlog.clone();
-        let backlog_pool = pool.clone();
-        let c4 = cancel.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
-            loop {
-                tokio::select! {
-                    _ = c4.cancelled() => return,
-                    _ = interval.tick() => {
-                        if let Ok(client) = backlog_pool.get().await
-                            && let Ok(row) = client.query_one("SELECT count(*) FROM outbox_events WHERE published_at IS NULL", &[]).await
-                        {
-                            let n: i64 = row.get(0);
-                            backlog.set(n);
+            let Some((publisher, fraud_c, analytics_c)) = build_messaging(&broker).await else {
+                return;
+            };
+            let store = Arc::new(PgStore::new(pool.clone()));
+            let outbox = outbox::OutboxPublisher::new(store.clone(), publisher);
+            let fraud_handler: Arc<dyn EventHandler> =
+                Arc::new(fraud::FraudHandler::new(store.clone()));
+            let analytics_handler: Arc<dyn EventHandler> =
+                Arc::new(analytics::AnalyticsHandler::new(store));
+            let (c1, c2, c3) = (cancel.clone(), cancel.clone(), cancel.clone());
+            tokio::spawn(async move { outbox.run(c1).await });
+            tokio::spawn(async move { fraud_c.run(fraud_handler, c2).await });
+            tokio::spawn(async move { analytics_c.run(analytics_handler, c3).await });
+
+            // Pipeline backlog SLI: poll unpublished outbox rows into a gauge.
+            let c4 = cancel.clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+                loop {
+                    tokio::select! {
+                        _ = c4.cancelled() => return,
+                        _ = interval.tick() => {
+                            if let Ok(client) = pool.get().await
+                                && let Ok(row) = client.query_one("SELECT count(*) FROM outbox_events WHERE published_at IS NULL", &[]).await
+                            {
+                                let n: i64 = row.get(0);
+                                backlog.set(n);
+                            }
                         }
                     }
                 }
-            }
+            });
         });
     }
 
