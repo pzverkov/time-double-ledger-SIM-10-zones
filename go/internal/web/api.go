@@ -328,7 +328,7 @@ func (a *API) handleReplaySpool(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := a.led.ReplaySpool(r.Context(), zoneID, req.Limit, req.Actor, req.Reason)
 	if err != nil {
-		http.Error(w, err.Error(), 409)
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	writeJSON(w, 200, res)
@@ -378,7 +378,7 @@ func (a *API) handleIncidentAction(w http.ResponseWriter, r *http.Request) {
 		Reason:   req.Reason,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), 409)
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
 	writeJSON(w, 200, out)
