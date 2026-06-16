@@ -104,6 +104,19 @@ pub trait AnalyticsStore: Send + Sync {
     ) -> Result<bool, BrokerError>;
 }
 
+/// Records a poison event (redelivery exhausted) for inspection/replay.
+#[async_trait]
+pub trait DeadLetterStore: Send + Sync {
+    async fn dead_letter(
+        &self,
+        consumer: &str,
+        event_id: Option<&str>,
+        payload: &[u8],
+        error: &str,
+        delivered: i64,
+    ) -> Result<(), BrokerError>;
+}
+
 /// Postgres-backed implementation of all DB ports.
 #[derive(Clone)]
 pub struct PgStore {
@@ -229,6 +242,30 @@ impl AnalyticsStore for PgStore {
         .await?;
         tx.commit().await?;
         Ok(true)
+    }
+}
+
+#[async_trait]
+impl DeadLetterStore for PgStore {
+    async fn dead_letter(
+        &self,
+        consumer: &str,
+        event_id: Option<&str>,
+        payload: &[u8],
+        error: &str,
+        delivered: i64,
+    ) -> Result<(), BrokerError> {
+        // Store the body as JSONB; fall back to a wrapper if it is not valid JSON.
+        let body: serde_json::Value = serde_json::from_slice(payload)
+            .unwrap_or_else(|_| serde_json::json!({ "raw": String::from_utf8_lossy(payload) }));
+        let client = self.db.get().await?;
+        client
+            .execute(
+                "INSERT INTO dead_letter_events(consumer, event_id, payload, error, delivered) VALUES($1,$2,$3,$4,$5)",
+                &[&consumer, &event_id, &body, &error, &delivered],
+            )
+            .await?;
+        Ok(())
     }
 }
 
