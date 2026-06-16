@@ -4,6 +4,10 @@ go/cover.out
 # Rust
 rust/**/target/
 
+# Web
+web/dist/
+web/node_modules/
+
 # OS
 .DS_Store
 
