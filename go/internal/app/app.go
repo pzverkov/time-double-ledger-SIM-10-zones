@@ -53,7 +53,13 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if cfg.NatsURL == "" {
 		return nil, errors.New("NATS_URL required")
 	}
-	nc, err := nats.Connect(cfg.NatsURL, nats.MaxReconnects(-1), nats.ReconnectWait(500*time.Millisecond))
+	// Auth/TLS: user/password and tls:// are carried by NATS_URL; NATS_CREDS
+	// (a JWT/nkey credentials file) is the standard production mechanism.
+	natsOpts := []nats.Option{nats.MaxReconnects(-1), nats.ReconnectWait(500 * time.Millisecond)}
+	if cfg.NatsCreds != "" {
+		natsOpts = append(natsOpts, nats.UserCredentials(cfg.NatsCreds))
+	}
+	nc, err := nats.Connect(cfg.NatsURL, natsOpts...)
 	if err != nil {
 		return nil, err
 	}

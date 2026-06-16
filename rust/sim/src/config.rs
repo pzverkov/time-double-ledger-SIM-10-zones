@@ -32,3 +32,53 @@ pub const RETENTION_SECS: i64 = 7 * 24 * 3600;
 
 /// Dead-letter rows are kept longer for investigation.
 pub const DLQ_RETENTION_SECS: i64 = 30 * 24 * 3600;
+
+/// Known weak/example admin keys that must never guard a production deployment.
+pub const WEAK_ADMIN_KEYS: &[&str] = &[
+    "dev-admin-key",
+    "test-admin-key",
+    "changeme",
+    "admin",
+    "password",
+];
+
+/// Production safety check: when `APP_ENV=production`, the admin key must be set
+/// and must not be a known weak default. Returns a human-readable error on a
+/// misconfiguration so the binary can refuse to start. A no-op outside
+/// production so the local demo keeps working with its dev defaults.
+pub fn check_admin_key(app_env: &str, admin_key: Option<&str>) -> Result<(), String> {
+    if app_env != "production" {
+        return Ok(());
+    }
+    match admin_key {
+        None | Some("") => Err("ADMIN_KEY must be set in production".into()),
+        Some(k) if WEAK_ADMIN_KEYS.contains(&k) => Err(format!(
+            "ADMIN_KEY is a known weak default ({k}); set a strong secret in production"
+        )),
+        Some(_) => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_key_check_is_noop_outside_production() {
+        assert!(check_admin_key("development", None).is_ok());
+        assert!(check_admin_key("", Some("dev-admin-key")).is_ok());
+    }
+
+    #[test]
+    fn production_rejects_missing_or_weak_admin_key() {
+        assert!(check_admin_key("production", None).is_err());
+        assert!(check_admin_key("production", Some("")).is_err());
+        assert!(check_admin_key("production", Some("dev-admin-key")).is_err());
+        assert!(check_admin_key("production", Some("admin")).is_err());
+    }
+
+    #[test]
+    fn production_accepts_a_strong_admin_key() {
+        assert!(check_admin_key("production", Some("s3cr3t-long-random-value")).is_ok());
+    }
+}

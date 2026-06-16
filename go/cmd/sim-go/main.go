@@ -14,6 +14,9 @@ import (
 
 func main() {
 	cfg := app.LoadConfigFromEnv()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("insecure configuration: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
