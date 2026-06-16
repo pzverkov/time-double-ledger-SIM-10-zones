@@ -27,6 +27,7 @@ services:
     command: ["-url=jdbc:postgresql://postgres:5432/timeledger", "-user=postgres", "-password=postgres", "migrate"]
 
   sim-go:
+    image: ci-sim-go:test
     build:
       context: ../go
       dockerfile: Dockerfile
@@ -44,6 +45,7 @@ services:
       - "8080:8080"
 
   sim-rust:
+    image: ci-sim-rust:test
     build:
       context: ../rust/sim
       dockerfile: Dockerfile
