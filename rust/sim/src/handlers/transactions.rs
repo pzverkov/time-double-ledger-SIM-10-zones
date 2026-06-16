@@ -1,4 +1,8 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::StatusCode,
+};
 use serde::Serialize;
 use serde_json::json;
 
@@ -26,7 +30,11 @@ struct PostingRow {
 pub async fn list_transactions(
     State(st): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let client = st.db.get().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let client = st
+        .db
+        .get()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows = client
         .query(
             "SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at FROM transactions ORDER BY created_at DESC LIMIT 100",
@@ -58,7 +66,11 @@ pub async fn get_transaction(
     Path(transaction_id): Path<String>,
     State(st): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let client = st.db.get().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let client = st
+        .db
+        .get()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let row = client
         .query_one(
             "SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at, metadata FROM transactions WHERE id::text=$1",

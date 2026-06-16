@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use time_ledger_sim_rust::messaging::store::{fold_stats, fraud_verdict, ZoneStat};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use time_ledger_sim_rust::messaging::store::{ZoneStat, fold_stats, fraud_verdict};
 
 fn bench_pure(c: &mut Criterion) {
     c.bench_function("fraud_verdict", |b| {

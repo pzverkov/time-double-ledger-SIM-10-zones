@@ -1,4 +1,9 @@
-use axum::{extract::State, http::{HeaderMap, StatusCode}, response::IntoResponse, Json};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+};
 use serde_json::json;
 use std::env;
 
@@ -46,7 +51,11 @@ pub fn admin_guard(st: &AppState, headers: &HeaderMap) -> Result<(), StatusCode>
                 .get("x-admin-key")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            if got == k { Ok(()) } else { Err(StatusCode::FORBIDDEN) }
+            if got == k {
+                Ok(())
+            } else {
+                Err(StatusCode::FORBIDDEN)
+            }
         }
     }
 }
@@ -65,7 +74,12 @@ pub async fn snapshot(
     });
 
     // zones
-    let rows = client.query("SELECT id,name,status,updated_at FROM zones ORDER BY id", &[]).await?;
+    let rows = client
+        .query(
+            "SELECT id,name,status,updated_at FROM zones ORDER BY id",
+            &[],
+        )
+        .await?;
     let zones: Vec<serde_json::Value> = rows.iter().map(|r| {
         let dt: time::OffsetDateTime = r.get("updated_at");
         json!({"id": r.get::<_,String>("id"), "name": r.get::<_,String>("name"), "status": r.get::<_,String>("status"), "updated_at": fmt_rfc3339(dt)})
@@ -137,10 +151,22 @@ pub async fn restore(
 
     // truncate mutable tables
     for table in &[
-        "postings", "transactions", "balances", "accounts", "incidents",
-        "outbox_events", "inbox_events", "audit_log", "spooled_transfers", "zone_controls",
+        "postings",
+        "transactions",
+        "balances",
+        "accounts",
+        "incidents",
+        "outbox_events",
+        "inbox_events",
+        "audit_log",
+        "spooled_transfers",
+        "zone_controls",
     ] {
-        tx.execute(&format!("TRUNCATE TABLE {table} RESTART IDENTITY CASCADE"), &[]).await?;
+        tx.execute(
+            &format!("TRUNCATE TABLE {table} RESTART IDENTITY CASCADE"),
+            &[],
+        )
+        .await?;
     }
 
     // zones: update statuses
@@ -149,7 +175,11 @@ pub async fn restore(
             let id = z.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let status = z.get("status").and_then(|v| v.as_str()).unwrap_or("");
             if !id.is_empty() && (status == "OK" || status == "DEGRADED" || status == "DOWN") {
-                tx.execute("UPDATE zones SET status=$2, updated_at=now() WHERE id=$1", &[&id, &status]).await?;
+                tx.execute(
+                    "UPDATE zones SET status=$2, updated_at=now() WHERE id=$1",
+                    &[&id, &status],
+                )
+                .await?;
             }
         }
     }
@@ -158,27 +188,51 @@ pub async fn restore(
     if let Some(cs) = snap.get("zone_controls").and_then(|v| v.as_array()) {
         for c in cs {
             let zid = c.get("zone_id").and_then(|v| v.as_str()).unwrap_or("");
-            if zid.is_empty() { continue; }
-            let wb = c.get("writes_blocked").and_then(|v| v.as_bool()).unwrap_or(false);
-            let thr = c.get("cross_zone_throttle").and_then(|v| v.as_i64()).unwrap_or(100) as i32;
-            let sp = c.get("spool_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            if zid.is_empty() {
+                continue;
+            }
+            let wb = c
+                .get("writes_blocked")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let thr = c
+                .get("cross_zone_throttle")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(100) as i32;
+            let sp = c
+                .get("spool_enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             tx.execute(
                 "INSERT INTO zone_controls(zone_id,writes_blocked,cross_zone_throttle,spool_enabled,updated_at) VALUES($1,$2,$3,$4,now()) ON CONFLICT (zone_id) DO UPDATE SET writes_blocked=EXCLUDED.writes_blocked, cross_zone_throttle=EXCLUDED.cross_zone_throttle, spool_enabled=EXCLUDED.spool_enabled, updated_at=now()",
                 &[&zid, &wb, &thr, &sp],
             ).await?;
         }
     } else {
-        tx.execute("INSERT INTO zone_controls(zone_id) SELECT id FROM zones ON CONFLICT DO NOTHING", &[]).await?;
+        tx.execute(
+            "INSERT INTO zone_controls(zone_id) SELECT id FROM zones ON CONFLICT DO NOTHING",
+            &[],
+        )
+        .await?;
     }
 
     // accounts + balances
     if let Some(acs) = snap.get("accounts").and_then(|v| v.as_array()) {
         for a in acs {
             let id = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            if id.is_empty() { continue; }
-            let zid = a.get("zone_id").and_then(|v| v.as_str()).unwrap_or("zone-eu");
+            if id.is_empty() {
+                continue;
+            }
+            let zid = a
+                .get("zone_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("zone-eu");
             let bal = a.get("balance_units").and_then(|v| v.as_i64()).unwrap_or(0);
-            tx.execute("INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING", &[&id, &zid]).await?;
+            tx.execute(
+                "INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
+                &[&id, &zid],
+            )
+            .await?;
             tx.execute("INSERT INTO balances(account_id,balance_units,updated_at) VALUES($1,$2,now()) ON CONFLICT (account_id) DO UPDATE SET balance_units=EXCLUDED.balance_units, updated_at=now()", &[&id, &bal]).await?;
         }
     }
@@ -188,7 +242,9 @@ pub async fn restore(
         for i in ins {
             let zid = i.get("zone_id").and_then(|v| v.as_str()).unwrap_or("");
             let title = i.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            if zid.is_empty() || title.is_empty() { continue; }
+            if zid.is_empty() || title.is_empty() {
+                continue;
+            }
             let sev = i.get("severity").and_then(|v| v.as_str()).unwrap_or("INFO");
             let st = i.get("status").and_then(|v| v.as_str()).unwrap_or("OPEN");
             let rel = i.get("related_txn_id").and_then(|v| v.as_str());
@@ -206,13 +262,18 @@ pub async fn restore(
     if let Some(sp) = snap.get("spooled_transfers").and_then(|v| v.as_array()) {
         for s in sp {
             let req = s.get("request_id").and_then(|v| v.as_str()).unwrap_or("");
-            if req.is_empty() { continue; }
+            if req.is_empty() {
+                continue;
+            }
             let ph = s.get("payload_hash").and_then(|v| v.as_str()).unwrap_or("");
             let from = s.get("from_account").and_then(|v| v.as_str()).unwrap_or("");
             let to = s.get("to_account").and_then(|v| v.as_str()).unwrap_or("");
             let amt = s.get("amount_units").and_then(|v| v.as_i64()).unwrap_or(0);
             let zid = s.get("zone_id").and_then(|v| v.as_str()).unwrap_or("");
-            let st = s.get("status").and_then(|v| v.as_str()).unwrap_or("PENDING");
+            let st = s
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("PENDING");
             let fail = s.get("fail_reason").and_then(|v| v.as_str());
             let meta = s.get("metadata").unwrap_or(&serde_json::Value::Null);
             let meta_str = serde_json::to_string(meta).unwrap_or_default();
@@ -230,7 +291,9 @@ pub async fn restore(
             let action = a.get("action").and_then(|v| v.as_str()).unwrap_or("");
             let tt = a.get("target_type").and_then(|v| v.as_str()).unwrap_or("");
             let tid = a.get("target_id").and_then(|v| v.as_str()).unwrap_or("");
-            if actor.is_empty() || action.is_empty() || tt.is_empty() || tid.is_empty() { continue; }
+            if actor.is_empty() || action.is_empty() || tt.is_empty() || tid.is_empty() {
+                continue;
+            }
             let reason = a.get("reason").and_then(|v| v.as_str());
             let details = a.get("details").unwrap_or(&serde_json::Value::Null);
             let details_str = serde_json::to_string(details).unwrap_or_default();
