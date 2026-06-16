@@ -12,12 +12,21 @@ pub enum AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        // Internal details are logged server-side and never sent to the client,
+        // so SQL/driver errors are not disclosed.
+        if let Self::Internal(detail) = &self {
+            tracing::error!(error = %detail, "internal error");
+        }
         let (status, code, message) = match self {
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, "bad_request", m),
             Self::NotFound(m) => (StatusCode::NOT_FOUND, "not_found", m),
             Self::Conflict(m) => (StatusCode::CONFLICT, "conflict", m),
             Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m),
-            Self::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, "internal", m),
+            Self::Internal(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                "internal error".to_string(),
+            ),
         };
         (status, Json(json!({ "error": message, "code": code }))).into_response()
     }
@@ -79,9 +88,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn internal_returns_500() {
-        let (status, body) = error_body(AppError::Internal("db error".into())).await;
+    async fn internal_returns_500_without_leaking_detail() {
+        let (status, body) =
+            error_body(AppError::Internal("error serializing parameter 0".into())).await;
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(body["code"], "internal");
+        // the internal detail must not reach the client
+        assert_eq!(body["error"], "internal error");
     }
 }
