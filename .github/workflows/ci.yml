@@ -104,7 +104,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Start test infra
-        run: docker compose -f ci/docker-compose.test.yml up -d --build --wait --wait-timeout 120
+        # Retry to absorb transient Docker Hub image-pull timeouts on the runner.
+        run: |
+          n=0
+          until docker compose -f ci/docker-compose.test.yml up -d --build --wait --wait-timeout 120; do
+            n=$((n + 1))
+            if [ "$n" -ge 3 ]; then echo "infra failed to start after $n attempts"; exit 1; fi
+            echo "infra start attempt $n failed (likely a registry pull timeout), retrying in 15s..."
+            sleep 15
+          done
       - name: Wait for backends
         run: |
           for port in 8080 8081; do
