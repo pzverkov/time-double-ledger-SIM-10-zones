@@ -33,6 +33,12 @@ jobs:
       - name: Download modules
         working-directory: go
         run: go mod download
+      - name: Format check
+        working-directory: go
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; echo 'run gofmt -w .'; exit 1; }
+      - name: Vet
+        working-directory: go
+        run: go vet ./...
       - name: Test
         working-directory: go
         run: go test ./...
@@ -46,6 +52,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
       - name: Generate Cargo.lock
         working-directory: rust/sim
         run: cargo generate-lockfile
@@ -53,9 +61,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust/sim
+      - name: Format check
+        working-directory: rust/sim
+        run: cargo fmt --check
       - name: Clippy
         working-directory: rust/sim
-        run: cargo clippy --all-targets
+        run: cargo clippy --all-targets --features redpanda -- -D warnings
       - name: Test
         working-directory: rust/sim
         run: cargo test
