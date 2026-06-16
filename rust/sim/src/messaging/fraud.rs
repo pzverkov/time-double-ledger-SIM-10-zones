@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::broker::{BrokerError, EventHandler, IncomingEvent};
-use super::store::{fraud_verdict, FraudStore, Incident, TransferPosted};
+use super::store::{FraudStore, Incident, TransferPosted, fraud_verdict};
 
 pub const CONSUMER: &str = "fraud-v1";
 
@@ -21,7 +21,11 @@ impl FraudHandler {
 impl EventHandler for FraudHandler {
     async fn handle(&self, event: &IncomingEvent) -> Result<(), BrokerError> {
         let ev: TransferPosted = serde_json::from_slice(&event.payload)?;
-        let event_id = ev.event_id.clone().or_else(|| event.msg_id.clone()).unwrap_or_default();
+        let event_id = ev
+            .event_id
+            .clone()
+            .or_else(|| event.msg_id.clone())
+            .unwrap_or_default();
         if event_id.is_empty() {
             return Ok(());
         }
@@ -33,7 +37,9 @@ impl EventHandler for FraudHandler {
         });
 
         // Claim + write are atomic in the store; a duplicate returns false (no-op).
-        self.store.record_fraud(&event_id, incident.as_ref()).await?;
+        self.store
+            .record_fraud(&event_id, incident.as_ref())
+            .await?;
         Ok(())
     }
 }
@@ -53,7 +59,11 @@ mod tests {
 
     #[async_trait]
     impl FraudStore for FakeFraudStore {
-        async fn record_fraud(&self, event_id: &str, incident: Option<&Incident>) -> Result<bool, BrokerError> {
+        async fn record_fraud(
+            &self,
+            event_id: &str,
+            incident: Option<&Incident>,
+        ) -> Result<bool, BrokerError> {
             if self.fail {
                 return Err("store boom".into());
             }
@@ -75,7 +85,10 @@ mod tests {
             "amount_units": amount,
         }))
         .unwrap();
-        IncomingEvent { msg_id: Some(event_id.to_string()), payload: body }
+        IncomingEvent {
+            msg_id: Some(event_id.to_string()),
+            payload: body,
+        }
     }
 
     #[tokio::test]
@@ -109,7 +122,10 @@ mod tests {
 
     #[tokio::test]
     async fn store_error_propagates_for_redelivery() {
-        let store = Arc::new(FakeFraudStore { fail: true, ..Default::default() });
+        let store = Arc::new(FakeFraudStore {
+            fail: true,
+            ..Default::default()
+        });
         let h = FraudHandler::new(store);
         let err = h.handle(&event("e1", "zone-eu", 5000)).await;
         assert!(err.is_err()); // consumer will not ack -> redelivered
@@ -120,7 +136,12 @@ mod tests {
         let store = Arc::new(FakeFraudStore::default());
         let h = FraudHandler::new(store.clone());
         let body = serde_json::to_vec(&serde_json::json!({"amount_units": 5000})).unwrap();
-        h.handle(&IncomingEvent { msg_id: None, payload: body }).await.unwrap();
+        h.handle(&IncomingEvent {
+            msg_id: None,
+            payload: body,
+        })
+        .await
+        .unwrap();
         assert_eq!(store.incidents.lock().unwrap().len(), 0);
         assert!(store.seen.lock().unwrap().is_empty());
     }

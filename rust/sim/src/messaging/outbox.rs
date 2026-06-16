@@ -48,7 +48,10 @@ impl OutboxPublisher {
 impl OutboxRow {
     #[cfg(test)]
     pub fn new(id: impl Into<String>, payload: serde_json::Value) -> Self {
-        Self { id: id.into(), payload }
+        Self {
+            id: id.into(),
+            payload,
+        }
     }
 }
 
@@ -79,7 +82,12 @@ mod tests {
 
     #[async_trait]
     impl EventPublisher for MockPublisher {
-        async fn publish(&self, _subject: &str, msg_id: &str, body: Vec<u8>) -> Result<(), BrokerError> {
+        async fn publish(
+            &self,
+            _subject: &str,
+            msg_id: &str,
+            body: Vec<u8>,
+        ) -> Result<(), BrokerError> {
             let mut p = self.published.lock().unwrap();
             if let Some(k) = self.fail_after
                 && p.len() >= k
@@ -101,9 +109,17 @@ mod tests {
         fn with(ids: &[&str]) -> Self {
             let rows = ids
                 .iter()
-                .map(|id| OutboxRow::new(*id, serde_json::json!({"event_id": "generated_by_db", "amount_units": 1})))
+                .map(|id| {
+                    OutboxRow::new(
+                        *id,
+                        serde_json::json!({"event_id": "generated_by_db", "amount_units": 1}),
+                    )
+                })
                 .collect();
-            Self { rows: Mutex::new(rows), marked: Mutex::new(vec![]) }
+            Self {
+                rows: Mutex::new(rows),
+                marked: Mutex::new(vec![]),
+            }
         }
     }
 
@@ -156,7 +172,10 @@ mod tests {
     #[tokio::test]
     async fn publish_failure_stops_batch_leaving_rest_unpublished() {
         let store = Arc::new(FakeOutboxStore::with(&["a", "b", "c"]));
-        let pubr = Arc::new(MockPublisher { fail_after: Some(2), ..Default::default() });
+        let pubr = Arc::new(MockPublisher {
+            fail_after: Some(2),
+            ..Default::default()
+        });
         let p = OutboxPublisher::new(store.clone(), pubr.clone());
         let res = p.publish_batch(50).await;
         assert!(res.is_err());

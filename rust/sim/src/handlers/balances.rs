@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{Json, extract::State, http::StatusCode};
 use serde::Serialize;
 use serde_json::json;
 
@@ -15,7 +15,11 @@ struct BalanceRow {
 pub async fn list_balances(
     State(st): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let client = st.db.get().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let client = st
+        .db
+        .get()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let rows = client
         .query(
             "SELECT account_id, balance_units, updated_at FROM balances ORDER BY updated_at DESC LIMIT 100",

@@ -1,9 +1,12 @@
-use axum::{extract::{Path, State}, Json};
+use axum::{
+    Json,
+    extract::{Path, State},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use crate::handlers::transfers::{TransferInput, apply_transfer_bypass};
 use crate::state::AppState;
-use crate::handlers::transfers::{apply_transfer_bypass, TransferInput};
 
 #[derive(Serialize)]
 pub struct SpoolStats {
@@ -43,7 +46,9 @@ pub struct ReplayRequest {
     pub reason: String,
 }
 
-fn default_limit() -> i64 { 50 }
+fn default_limit() -> i64 {
+    50
+}
 
 #[derive(Serialize)]
 pub struct ReplayResult {
@@ -67,10 +72,18 @@ pub async fn replay_spool(
     let status: String = status_row.get(0);
 
     let ctrl_row = client
-        .query_opt("SELECT writes_blocked, cross_zone_throttle FROM zone_controls WHERE zone_id=$1", &[&zone_id])
+        .query_opt(
+            "SELECT writes_blocked, cross_zone_throttle FROM zone_controls WHERE zone_id=$1",
+            &[&zone_id],
+        )
         .await?;
     let (wb, throttle) = ctrl_row
-        .map(|r| (r.get::<_, bool>("writes_blocked"), r.get::<_, i32>("cross_zone_throttle")))
+        .map(|r| {
+            (
+                r.get::<_, bool>("writes_blocked"),
+                r.get::<_, i32>("cross_zone_throttle"),
+            )
+        })
         .unwrap_or((false, 100));
 
     if status == "DOWN" || wb || throttle == 0 {
@@ -98,11 +111,19 @@ pub async fn replay_spool(
         let zone_id_val: String = row.get("zone_id");
         let metadata: serde_json::Value = row.get("metadata");
 
-        let result = apply_transfer_bypass(&st, &TransferInput {
-            request_id: &request_id, payload_hash: &payload_hash,
-            from_account: &from_account, to_account: &to_account,
-            amount_units, zone_id: &zone_id_val, metadata: &metadata,
-        }).await;
+        let result = apply_transfer_bypass(
+            &st,
+            &TransferInput {
+                request_id: &request_id,
+                payload_hash: &payload_hash,
+                from_account: &from_account,
+                to_account: &to_account,
+                amount_units,
+                zone_id: &zone_id_val,
+                metadata: &metadata,
+            },
+        )
+        .await;
 
         match result {
             Ok(_) => {
@@ -135,5 +156,9 @@ pub async fn replay_spool(
         )
         .await;
 
-    Ok(Json(ReplayResult { zone_id, applied, failed }))
+    Ok(Json(ReplayResult {
+        zone_id,
+        applied,
+        failed,
+    }))
 }
