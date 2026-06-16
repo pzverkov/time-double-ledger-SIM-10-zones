@@ -55,6 +55,7 @@ mod tests {
             &self,
             _subject: &str,
             msg_id: &str,
+            _traceparent: Option<&str>,
             body: Vec<u8>,
         ) -> Result<(), BrokerError> {
             let mut p = self.published.lock().unwrap();
@@ -119,7 +120,12 @@ mod tests {
                 let body = serde_json::to_vec(&inject(&row.payload, &row.id)).unwrap();
                 // On failure, abort without recording any marks (rollback).
                 publisher
-                    .publish(super::super::broker::SUBJECT_TRANSFER_POSTED, &row.id, body)
+                    .publish(
+                        super::super::broker::SUBJECT_TRANSFER_POSTED,
+                        &row.id,
+                        None,
+                        body,
+                    )
                     .await?;
                 newly_marked.push(row.id.clone());
             }

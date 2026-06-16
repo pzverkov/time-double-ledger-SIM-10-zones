@@ -129,7 +129,7 @@ impl OutboxStore for PgStore {
         // Claim the batch; other pollers skip these locked rows.
         let rows = tx
             .query(
-                "SELECT id::text, payload FROM outbox_events WHERE published_at IS NULL ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED",
+                "SELECT id::text, payload, traceparent FROM outbox_events WHERE published_at IS NULL ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED",
                 &[&limit],
             )
             .await?;
@@ -138,13 +138,14 @@ impl OutboxStore for PgStore {
         for row in &rows {
             let id: String = row.get("id");
             let payload: serde_json::Value = row.get("payload");
+            let traceparent: Option<String> = row.get("traceparent");
             let body = serde_json::to_vec(&inject_event_id(payload, &id))?;
 
             // Bound the publish so a hung broker cannot pin this transaction's
             // connection (and its row locks) past the idle-in-transaction timeout.
             match tokio::time::timeout(
                 PUBLISH_TIMEOUT,
-                publisher.publish(SUBJECT_TRANSFER_POSTED, &id, body),
+                publisher.publish(SUBJECT_TRANSFER_POSTED, &id, traceparent.as_deref(), body),
             )
             .await
             {
