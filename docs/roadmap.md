@@ -24,7 +24,7 @@ This project is a finance-flavored simulation game: double-entry ledger, idempot
 **Trade-off:** a bit of setup, a lot less regret.
 
 Done when:
-- CI runs on PRs, secrets are only in Secret Manager, and “admin” actions are gated.
+- CI runs on PRs, secrets are only in Secret Manager, and "admin" actions are gated.
 
 ---
 
@@ -47,7 +47,7 @@ Done when:
 **What we do:**
 - Add region config files only (`deploy/regions/*.yaml`).
 - Same workflow, manual toggles to deploy.
-- Each region is an independent “game instance” (no global ledger).
+- Each region is an independent "game instance" (no global ledger).
 **Trade-off:** each region adds baseline cost for state (DB + NATS VM), but compute stays cheap.
 
 Done when:
@@ -60,7 +60,7 @@ Done when:
 **What we do:**
 - Buy a domain.
 - Create global external HTTPS load balancer with serverless NEGs to Cloud Run services.
-- Route policy: “closest region” or “EU primary + failover.”
+- Route policy: "closest region" or "EU primary + failover."
 **Trade-off:** introduces a baseline monthly cost even at low traffic.
 
 Done when:
@@ -69,7 +69,7 @@ Done when:
 ---
 
 ### Phase 4 - Mature Finance Posture
-**Goal:** “not just correct, but resilient under stress.”  
+**Goal:** "not just correct, but resilient under stress."  
 **What we do (later):**
 - HA DB, multi-node messaging, stronger auth (OIDC), tighter IAM, richer audit export.
 - SLOs, alerts, and incident response playbooks.
@@ -80,7 +80,7 @@ Done when:
 
 ---
 
-## “Split Repos Later” Plan (No Pain Version)
+## "Split Repos Later" Plan (No Pain Version)
 
 We start as a monorepo for speed. Later, we split without rewriting.
 
@@ -109,7 +109,7 @@ We start as a monorepo for speed. Later, we split without rewriting.
 
 ### Next
 - Add dependency graph editor in UI (instead of hardcoded deps)
-- Add “runbook checklist” per incident (stored in incident.details JSON)
+- Add "runbook checklist" per incident (stored in incident.details JSON)
 - Add reconciliation job (ledger invariant checks) + report panel
 
 ### Later
@@ -119,9 +119,9 @@ We start as a monorepo for speed. Later, we split without rewriting.
 
 ---
 
-## Decisions We’ve Made (So We Don’t Re-decide Them Every Week)
+## Decisions We've Made (So We Don't Re-decide Them Every Week)
 
 - EU is the main demo region first; AU/SA/AF are optional.
-- “10 zones” are logical game zones, not tied to physical regions.
+- "10 zones" are logical game zones, not tied to physical regions.
 - Load balancer + custom domain happens only after the demo is stable.
-- We optimize for finance correctness even if it’s “a bit boring.”
+- We optimize for finance correctness even if it's "a bit boring."
