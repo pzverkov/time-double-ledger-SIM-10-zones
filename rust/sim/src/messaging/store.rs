@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use deadpool_postgres::Pool;
 use serde::Deserialize;
 
-use super::broker::BrokerError;
+use super::broker::{BrokerError, EventPublisher, SUBJECT_TRANSFER_POSTED};
+use crate::config::PUBLISH_TIMEOUT;
 
 /// Large-transfer threshold: 1 hour expressed in seconds.
 pub const LARGE_TRANSFER_UNITS: i64 = 3600;
@@ -53,8 +54,29 @@ pub fn fold_stats(prev: ZoneStat, amount_units: i64) -> ZoneStat {
 
 #[async_trait]
 pub trait OutboxStore: Send + Sync {
-    async fn fetch_unpublished(&self, limit: i64) -> Result<Vec<OutboxRow>, BrokerError>;
-    async fn mark_published(&self, id: &str) -> Result<(), BrokerError>;
+    /// Claim up to `limit` unpublished rows with FOR UPDATE SKIP LOCKED, publish
+    /// each via `publisher`, and mark them published - all in one transaction, so
+    /// concurrent pollers on other replicas skip each other's claimed rows.
+    /// Returns the number published. On any publish/timeout error the whole batch
+    /// rolls back (nothing marked) and is retried on the next tick.
+    async fn publish_batch(
+        &self,
+        limit: i64,
+        publisher: &dyn EventPublisher,
+    ) -> Result<usize, BrokerError>;
+}
+
+/// Replace a placeholder `event_id` in the payload with the outbox row id so the
+/// consumer-side dedup key matches the publish dedup key.
+fn inject_event_id(payload: serde_json::Value, id: &str) -> serde_json::Value {
+    let mut m = payload;
+    if let Some(obj) = m.as_object_mut() {
+        let eid = obj.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
+        if eid.is_empty() || eid == "generated_by_db" {
+            obj.insert("event_id".into(), serde_json::json!(id));
+        }
+    }
+    m
 }
 
 /// Fraud-consumer persistence. The claim (inbox dedup) and the incident write
@@ -96,32 +118,53 @@ impl PgStore {
 
 #[async_trait]
 impl OutboxStore for PgStore {
-    async fn fetch_unpublished(&self, limit: i64) -> Result<Vec<OutboxRow>, BrokerError> {
-        let client = self.db.get().await?;
-        let rows = client
+    async fn publish_batch(
+        &self,
+        limit: i64,
+        publisher: &dyn EventPublisher,
+    ) -> Result<usize, BrokerError> {
+        let mut client = self.db.get().await?;
+        let tx = client.transaction().await?;
+
+        // Claim the batch; other pollers skip these locked rows.
+        let rows = tx
             .query(
-                "SELECT id::text, payload FROM outbox_events WHERE published_at IS NULL ORDER BY created_at LIMIT $1",
+                "SELECT id::text, payload FROM outbox_events WHERE published_at IS NULL ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED",
                 &[&limit],
             )
             .await?;
-        Ok(rows
-            .iter()
-            .map(|r| OutboxRow {
-                id: r.get("id"),
-                payload: r.get("payload"),
-            })
-            .collect())
-    }
 
-    async fn mark_published(&self, id: &str) -> Result<(), BrokerError> {
-        let client = self.db.get().await?;
-        client
-            .execute(
+        let mut published = 0usize;
+        for row in &rows {
+            let id: String = row.get("id");
+            let payload: serde_json::Value = row.get("payload");
+            let body = serde_json::to_vec(&inject_event_id(payload, &id))?;
+
+            // Bound the publish so a hung broker cannot pin this transaction's
+            // connection (and its row locks) past the idle-in-transaction timeout.
+            match tokio::time::timeout(
+                PUBLISH_TIMEOUT,
+                publisher.publish(SUBJECT_TRANSFER_POSTED, &id, body),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    return Err(format!("publish timed out for outbox row {id}").into());
+                }
+            }
+
+            tx.execute(
                 "UPDATE outbox_events SET published_at=now() WHERE id=$1::text::uuid",
                 &[&id],
             )
             .await?;
-        Ok(())
+            published += 1;
+        }
+
+        tx.commit().await?;
+        Ok(published)
     }
 }
 
@@ -189,8 +232,36 @@ impl AnalyticsStore for PgStore {
 }
 
 #[cfg(test)]
+impl OutboxRow {
+    pub fn new(id: impl Into<String>, payload: serde_json::Value) -> Self {
+        Self {
+            id: id.into(),
+            payload,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inject_event_id_replaces_placeholder() {
+        let p = serde_json::json!({"event_id": "generated_by_db", "amount_units": 10});
+        assert_eq!(inject_event_id(p, "abc-123")["event_id"], "abc-123");
+    }
+
+    #[test]
+    fn inject_event_id_replaces_empty() {
+        let p = serde_json::json!({"event_id": "", "amount_units": 10});
+        assert_eq!(inject_event_id(p, "abc-123")["event_id"], "abc-123");
+    }
+
+    #[test]
+    fn inject_event_id_keeps_existing() {
+        let p = serde_json::json!({"event_id": "real-id", "amount_units": 10});
+        assert_eq!(inject_event_id(p, "abc-123")["event_id"], "real-id");
+    }
 
     #[test]
     fn fraud_verdict_boundary() {
