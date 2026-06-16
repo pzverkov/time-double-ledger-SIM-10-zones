@@ -222,7 +222,7 @@ func (l *Ledger) SetZoneStatus(ctx context.Context, zoneID, status, actor, reaso
 
 	_, err = tx.Exec(ctx, `
     INSERT INTO audit_log(actor,action,target_type,target_id,reason,details)
-    VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4))
+    VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4::text))
   `, actor, zoneID, reason, status)
 	if err != nil {
 		return nil, err
@@ -231,7 +231,7 @@ func (l *Ledger) SetZoneStatus(ctx context.Context, zoneID, status, actor, reaso
 	if status == "DOWN" {
 		_, _ = tx.Exec(ctx, `
       INSERT INTO incidents(zone_id,severity,title,details)
-      VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2,'actor',$3))
+      VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2::text,'actor',$3::text))
     `, zoneID, reason, actor)
 	}
 
@@ -859,7 +859,7 @@ func (l *Ledger) spoolTransferTx(ctx context.Context, tx pgx.Tx, in CreateTransf
 
 	_, _ = tx.Exec(ctx, `
     INSERT INTO audit_log(actor,action,target_type,target_id,reason,details)
-    VALUES('system','SPOOL_TRANSFER','zone',$1,$2, jsonb_build_object('request_id',$3,'spool_id',$4))
+    VALUES('system','SPOOL_TRANSFER','zone',$1,$2, jsonb_build_object('request_id',$3::text,'spool_id',$4::text))
   `, in.ZoneID, failReason, in.RequestID, id)
 
 	return id, nil
