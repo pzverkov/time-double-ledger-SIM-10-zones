@@ -16,6 +16,22 @@ pub async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
+/// Readiness: the process is up AND its database dependency is reachable. The
+/// acquire+query is bounded so a busy/exhausted pool reports not-ready instead of
+/// hanging the probe. The broker is intentionally not gated (the outbox buffers
+/// while it is down).
+pub async fn readyz(State(st): State<AppState>) -> impl IntoResponse {
+    let check = async {
+        let client = st.db.get().await.ok()?;
+        client.query_one("SELECT 1", &[]).await.ok()?;
+        Some(())
+    };
+    match tokio::time::timeout(crate::config::READYZ_TIMEOUT, check).await {
+        Ok(Some(())) => (StatusCode::OK, "ready"),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "not ready"),
+    }
+}
+
 #[derive(serde::Serialize)]
 struct VersionInfo {
     service: &'static str,

@@ -107,9 +107,16 @@ async fn main() {
 
     let (registry, metrics_state) = init_metrics();
 
-    let pg_config = database_url
+    let mut pg_config = database_url
         .parse::<tokio_postgres::Config>()
         .expect("invalid DATABASE_URL");
+    // Bound every connection: cap single statements and idle-in-transaction time
+    // (the latter must exceed the outbox per-publish timeout).
+    pg_config.options(format!(
+        "-c statement_timeout={} -c idle_in_transaction_session_timeout={}",
+        time_ledger_sim_rust::config::DB_STATEMENT_TIMEOUT_MS,
+        time_ledger_sim_rust::config::DB_IDLE_TX_TIMEOUT_MS,
+    ));
     let mgr = deadpool_postgres::Manager::new(pg_config, NoTls);
     let pool = deadpool_postgres::Pool::builder(mgr)
         .max_size(16)
@@ -162,6 +169,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/healthz", get(admin::healthz))
+        .route("/readyz", get(admin::readyz))
         .route("/metrics", get(admin::metrics))
         .route("/v1/version", get(admin::version))
         .route("/v1/zones", get(zones::list_zones))
@@ -196,6 +204,10 @@ async fn main() {
         .route("/v1/sim/snapshot", post(admin::snapshot))
         .route("/v1/sim/restore", post(admin::restore))
         .layer(middleware::from_fn(cors))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            time_ledger_sim_rust::config::REQUEST_TIMEOUT,
+        ))
         .with_state(st);
 
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();

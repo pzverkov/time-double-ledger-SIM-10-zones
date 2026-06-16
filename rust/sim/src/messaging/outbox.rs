@@ -3,8 +3,8 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use super::broker::{BrokerError, EventPublisher, SUBJECT_TRANSFER_POSTED};
-use super::store::{OutboxRow, OutboxStore};
+use super::broker::EventPublisher;
+use super::store::OutboxStore;
 
 pub struct OutboxPublisher {
     store: Arc<dyn OutboxStore>,
@@ -22,55 +22,24 @@ impl OutboxPublisher {
             tokio::select! {
                 _ = cancel.cancelled() => return,
                 _ = interval.tick() => {
-                    if let Err(e) = self.publish_batch(50).await {
+                    // The store claims rows with FOR UPDATE SKIP LOCKED, publishes,
+                    // and marks them in one transaction, so running this on several
+                    // replicas does not double-publish. On error the batch rolls
+                    // back and is retried next tick.
+                    if let Err(e) = self.store.publish_batch(50, &*self.publisher).await {
                         warn!(error = %e, "outbox publish batch failed");
                     }
                 }
             }
         }
     }
-
-    async fn publish_batch(&self, limit: i64) -> Result<(), BrokerError> {
-        let rows = self.store.fetch_unpublished(limit).await?;
-        for row in rows {
-            let body = serde_json::to_vec(&inject_event_id(row.payload, &row.id))?;
-            // On publish failure, stop the batch: remaining rows stay unpublished
-            // and are retried on the next tick (at-least-once).
-            self.publisher
-                .publish(SUBJECT_TRANSFER_POSTED, &row.id, body)
-                .await?;
-            self.store.mark_published(&row.id).await?;
-        }
-        Ok(())
-    }
-}
-
-impl OutboxRow {
-    #[cfg(test)]
-    pub fn new(id: impl Into<String>, payload: serde_json::Value) -> Self {
-        Self {
-            id: id.into(),
-            payload,
-        }
-    }
-}
-
-/// Replace a placeholder `event_id` in the payload with the outbox row id so the
-/// consumer-side dedup key matches the publish dedup key.
-fn inject_event_id(payload: serde_json::Value, id: &str) -> serde_json::Value {
-    let mut m = payload;
-    if let Some(obj) = m.as_object_mut() {
-        let eid = obj.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
-        if eid.is_empty() || eid == "generated_by_db" {
-            obj.insert("event_id".into(), serde_json::json!(id));
-        }
-    }
-    m
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messaging::broker::BrokerError;
+    use crate::messaging::store::OutboxRow;
     use async_trait::async_trait;
     use std::sync::Mutex;
 
@@ -100,6 +69,9 @@ mod tests {
         }
     }
 
+    /// In-memory outbox that mirrors the transactional store: it publishes each
+    /// claimed row and only marks it on success; any publish error aborts the
+    /// batch and marks nothing (atomic rollback).
     struct FakeOutboxStore {
         rows: Mutex<Vec<OutboxRow>>,
         marked: Mutex<Vec<String>>,
@@ -123,86 +95,87 @@ mod tests {
         }
     }
 
+    fn inject(payload: &serde_json::Value, id: &str) -> serde_json::Value {
+        let mut m = payload.clone();
+        if let Some(o) = m.as_object_mut() {
+            o.insert("event_id".into(), serde_json::json!(id));
+        }
+        m
+    }
+
     #[async_trait]
     impl OutboxStore for FakeOutboxStore {
-        async fn fetch_unpublished(&self, limit: i64) -> Result<Vec<OutboxRow>, BrokerError> {
-            let rows = self.rows.lock().unwrap();
-            Ok(rows.iter().take(limit as usize).cloned().collect())
-        }
-        async fn mark_published(&self, id: &str) -> Result<(), BrokerError> {
-            self.marked.lock().unwrap().push(id.to_string());
-            self.rows.lock().unwrap().retain(|r| r.id != id);
-            Ok(())
+        async fn publish_batch(
+            &self,
+            limit: i64,
+            publisher: &dyn EventPublisher,
+        ) -> Result<usize, BrokerError> {
+            let batch: Vec<OutboxRow> = {
+                let rows = self.rows.lock().unwrap();
+                rows.iter().take(limit as usize).cloned().collect()
+            };
+            let mut newly_marked = Vec::new();
+            for row in &batch {
+                let body = serde_json::to_vec(&inject(&row.payload, &row.id)).unwrap();
+                // On failure, abort without recording any marks (rollback).
+                publisher
+                    .publish(super::super::broker::SUBJECT_TRANSFER_POSTED, &row.id, body)
+                    .await?;
+                newly_marked.push(row.id.clone());
+            }
+            self.marked
+                .lock()
+                .unwrap()
+                .extend(newly_marked.iter().cloned());
+            self.rows
+                .lock()
+                .unwrap()
+                .retain(|r| !newly_marked.contains(&r.id));
+            Ok(newly_marked.len())
         }
     }
 
     #[tokio::test]
     async fn empty_batch_is_noop() {
-        let store = Arc::new(FakeOutboxStore::with(&[]));
-        let pubr = Arc::new(MockPublisher::default());
-        let p = OutboxPublisher::new(store.clone(), pubr.clone());
-        p.publish_batch(50).await.unwrap();
-        assert!(pubr.published.lock().unwrap().is_empty());
+        let store = FakeOutboxStore::with(&[]);
+        let pubr = MockPublisher::default();
+        assert_eq!(store.publish_batch(50, &pubr).await.unwrap(), 0);
         assert!(store.marked.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn publishes_in_order_with_id_as_msg_id() {
-        let store = Arc::new(FakeOutboxStore::with(&["a", "b", "c"]));
-        let pubr = Arc::new(MockPublisher::default());
-        let p = OutboxPublisher::new(store.clone(), pubr.clone());
-        p.publish_batch(50).await.unwrap();
+        let store = FakeOutboxStore::with(&["a", "b", "c"]);
+        let pubr = MockPublisher::default();
+        let n = store.publish_batch(50, &pubr).await.unwrap();
+        assert_eq!(n, 3);
         let published = pubr.published.lock().unwrap();
         let ids: Vec<&str> = published.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, ["a", "b", "c"]); // msg_id == outbox id, in order
-        // event_id placeholder rewritten to the row id
-        assert_eq!(published[0].1["event_id"], "a");
+        assert_eq!(published[0].1["event_id"], "a"); // placeholder rewritten
         assert_eq!(*store.marked.lock().unwrap(), vec!["a", "b", "c"]);
     }
 
     #[tokio::test]
     async fn respects_limit() {
-        let store = Arc::new(FakeOutboxStore::with(&["a", "b", "c"]));
-        let pubr = Arc::new(MockPublisher::default());
-        let p = OutboxPublisher::new(store, pubr.clone());
-        p.publish_batch(2).await.unwrap();
+        let store = FakeOutboxStore::with(&["a", "b", "c"]);
+        let pubr = MockPublisher::default();
+        assert_eq!(store.publish_batch(2, &pubr).await.unwrap(), 2);
         assert_eq!(pubr.published.lock().unwrap().len(), 2);
     }
 
     #[tokio::test]
-    async fn publish_failure_stops_batch_leaving_rest_unpublished() {
-        let store = Arc::new(FakeOutboxStore::with(&["a", "b", "c"]));
-        let pubr = Arc::new(MockPublisher {
+    async fn publish_failure_rolls_back_whole_batch() {
+        let store = FakeOutboxStore::with(&["a", "b", "c"]);
+        let pubr = MockPublisher {
             fail_after: Some(2),
             ..Default::default()
-        });
-        let p = OutboxPublisher::new(store.clone(), pubr.clone());
-        let res = p.publish_batch(50).await;
+        };
+        let res = store.publish_batch(50, &pubr).await;
         assert!(res.is_err());
-        // first two published + marked; third (and the rest) remain for retry
-        assert_eq!(pubr.published.lock().unwrap().len(), 2);
-        assert_eq!(*store.marked.lock().unwrap(), vec!["a", "b"]);
-        assert_eq!(store.rows.lock().unwrap().len(), 1); // "c" still unpublished
-    }
-
-    #[test]
-    fn inject_event_id_replaces_placeholder() {
-        let p = serde_json::json!({"event_id": "generated_by_db", "amount_units": 10});
-        let out = inject_event_id(p, "abc-123");
-        assert_eq!(out["event_id"], "abc-123");
-    }
-
-    #[test]
-    fn inject_event_id_replaces_empty() {
-        let p = serde_json::json!({"event_id": "", "amount_units": 10});
-        let out = inject_event_id(p, "abc-123");
-        assert_eq!(out["event_id"], "abc-123");
-    }
-
-    #[test]
-    fn inject_event_id_keeps_existing() {
-        let p = serde_json::json!({"event_id": "real-id", "amount_units": 10});
-        let out = inject_event_id(p, "abc-123");
-        assert_eq!(out["event_id"], "real-id");
+        // atomic: nothing is marked even though two reached the broker; they are
+        // republished next tick and dedup absorbs the repeat.
+        assert!(store.marked.lock().unwrap().is_empty());
+        assert_eq!(store.rows.lock().unwrap().len(), 3);
     }
 }
