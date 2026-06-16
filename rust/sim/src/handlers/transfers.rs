@@ -2,6 +2,7 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::config::THROTTLE_MAX_PCT;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::util::{fmt_rfc3339, hash_percent, payload_hash};
@@ -63,13 +64,14 @@ pub async fn create_transfer(
         .await?;
     let (wb, throttle, spool_enabled) = ctrl_row
         .map(|r| (r.get::<_, bool>(0), r.get::<_, i32>(1), r.get::<_, bool>(2)))
-        .unwrap_or((false, 100, false));
+        .unwrap_or((false, THROTTLE_MAX_PCT, false));
 
     let blocked_reason = if status == "DOWN" {
         Some("zone down")
     } else if wb {
         Some("writes blocked")
-    } else if throttle < 100 && (throttle <= 0 || hash_percent(&req.request_id) >= throttle as u32)
+    } else if throttle < THROTTLE_MAX_PCT
+        && (throttle <= 0 || hash_percent(&req.request_id) >= throttle as u32)
     {
         Some("throttled")
     } else {

@@ -1,11 +1,11 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::StatusCode,
 };
 use serde::Serialize;
 use serde_json::json;
 
+use crate::error::AppError;
 use crate::state::AppState;
 use crate::util::fmt_rfc3339;
 
@@ -29,19 +29,14 @@ struct PostingRow {
 
 pub async fn list_transactions(
     State(st): State<AppState>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let client = st
-        .db
-        .get()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+) -> Result<Json<serde_json::Value>, AppError> {
+    let client = st.db.get().await?;
     let rows = client
         .query(
             "SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at FROM transactions ORDER BY created_at DESC LIMIT 100",
             &[],
         )
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .await?;
 
     let txns: Vec<TxnRow> = rows
         .into_iter()
@@ -65,19 +60,15 @@ pub async fn list_transactions(
 pub async fn get_transaction(
     Path(transaction_id): Path<String>,
     State(st): State<AppState>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let client = st
-        .db
-        .get()
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+) -> Result<Json<serde_json::Value>, AppError> {
+    let client = st.db.get().await?;
     let row = client
         .query_one(
             "SELECT id::text as id, request_id, from_account, to_account, amount_units, zone_id, created_at, metadata FROM transactions WHERE id::text=$1",
             &[&transaction_id],
         )
         .await
-        .map_err(|e| (StatusCode::NOT_FOUND, e.to_string()))?;
+        .map_err(|_| AppError::NotFound("transaction not found".into()))?;
 
     let id: String = row.get("id");
     let request_id: String = row.get("request_id");
@@ -93,8 +84,7 @@ pub async fn get_transaction(
             "SELECT account_id, direction, amount_units FROM postings WHERE txn_id::text=$1 ORDER BY direction ASC",
             &[&transaction_id],
         )
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .await?;
 
     let postings: Vec<PostingRow> = post_rows
         .into_iter()
