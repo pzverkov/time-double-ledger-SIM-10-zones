@@ -121,6 +121,9 @@ jobs:
         env:
           BASE_URL: http://localhost:8081
           COMPOSE_FILE: ci/docker-compose.test.yml
+      - name: Dump backend logs on failure
+        if: failure()
+        run: docker compose -f ci/docker-compose.test.yml logs --tail=200 sim-rust sim-go nats
       - name: Install Schemathesis
         run: pip install schemathesis
       - name: Test Go backend
