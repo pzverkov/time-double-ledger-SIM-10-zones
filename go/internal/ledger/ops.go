@@ -66,7 +66,7 @@ func (l *Ledger) SetZoneControls(ctx context.Context, zoneID string, writesBlock
 	_, err = tx.Exec(ctx, `
     INSERT INTO audit_log(actor,action,target_type,target_id,reason,details)
     VALUES($1,'SET_ZONE_CONTROLS','zone',$2,$3,
-      jsonb_build_object('writes_blocked',$4,'cross_zone_throttle',$5,'spool_enabled',$6)
+      jsonb_build_object('writes_blocked',$4::bool,'cross_zone_throttle',$5::bigint,'spool_enabled',$6::bool)
     )
   `, actor, zoneID, reason, writesBlocked, crossZoneThrottle, spoolEnabled)
 	if err != nil {
@@ -83,7 +83,7 @@ func (l *Ledger) SetZoneControls(ctx context.Context, zoneID string, writesBlock
 		}
 		_, _ = tx.Exec(ctx, `
       INSERT INTO incidents(zone_id,severity,title,details)
-      VALUES($1,$2,$3, jsonb_build_object('reason',$4,'actor',$5,'writes_blocked',$6,'cross_zone_throttle',$7,'spool_enabled',$8))
+      VALUES($1,$2,$3, jsonb_build_object('reason',$4::text,'actor',$5::text,'writes_blocked',$6::bool,'cross_zone_throttle',$7::bigint,'spool_enabled',$8::bool))
     `, zoneID, sev, title, reason, actor, writesBlocked, crossZoneThrottle, spoolEnabled)
 	}
 
@@ -204,7 +204,7 @@ func (l *Ledger) ReplaySpool(ctx context.Context, zoneID string, limit int, acto
 	// Audit summary
 	_, _ = l.db.Exec(ctx, `
     INSERT INTO audit_log(actor,action,target_type,target_id,reason,details)
-    VALUES($1,'REPLAY_SPOOL','zone',$2,$3, jsonb_build_object('applied',$4,'failed',$5,'limit',$6))
+    VALUES($1,'REPLAY_SPOOL','zone',$2,$3, jsonb_build_object('applied',$4::bigint,'failed',$5::bigint,'limit',$6::bigint))
   `, actor, zoneID, reason, res.Applied, res.Failed, limit)
 
 	return res, nil
@@ -333,7 +333,7 @@ func (l *Ledger) ApplyIncidentAction(ctx context.Context, incidentID string, in 
 
 	_, err = tx.Exec(ctx, `
     INSERT INTO audit_log(actor,action,target_type,target_id,reason,details)
-    VALUES($1,$2,'incident',$3,$4, jsonb_build_object('assignee',$5,'note',$6,'status',$7))
+    VALUES($1,$2,'incident',$3,$4, jsonb_build_object('assignee',$5::text,'note',$6::text,'status',$7::text))
   `, in.Actor, "INCIDENT_"+in.Action, incidentID, in.Reason, in.Assignee, in.Note, newStatus)
 	if err != nil {
 		return nil, err
