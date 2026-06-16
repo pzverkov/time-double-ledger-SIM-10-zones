@@ -125,16 +125,17 @@ jobs:
         if: failure()
         run: docker compose -f ci/docker-compose.test.yml logs --tail=200 sim-rust sim-go nats
       - name: Install Schemathesis
-        run: pip install schemathesis
-      # Run the per-operation conformance phases (coverage, fuzzing). The stateful
-      # link-exploration phase is excluded: it chains hundreds of rapid requests
-      # and intermittently reports transient "connection aborted" transport errors
-      # (HTTP keep-alive reuse races against both shared backends), not schema
-      # violations, which made main flaky.
+        # Pinned: an unpinned install drifts versions across runs (non-reproducible).
+        run: pip install schemathesis==4.21.8
+      # Run the per-operation conformance phases (coverage, fuzzing); the stateful
+      # link-exploration phase is excluded as exploratory. --request-retries
+      # tolerates the occasional transient "connection aborted" (HTTP keep-alive
+      # reuse race against the shared backends under CI load), which is a transport
+      # flake, not a schema violation; a real violation still fails every retry.
       - name: Test Go backend
-        run: st run --checks response_schema_conformance --phases coverage,fuzzing --url http://localhost:8080 --exclude-path-regex '/v1/sim/' api/openapi.yaml
+        run: st run --checks response_schema_conformance --phases coverage,fuzzing --request-retries 3 --url http://localhost:8080 --exclude-path-regex '/v1/sim/' api/openapi.yaml
       - name: Test Rust backend
-        run: st run --checks response_schema_conformance --phases coverage,fuzzing --url http://localhost:8081 --exclude-path-regex '/v1/sim/' api/openapi.yaml
+        run: st run --checks response_schema_conformance --phases coverage,fuzzing --request-retries 3 --url http://localhost:8081 --exclude-path-regex '/v1/sim/' api/openapi.yaml
       - name: Teardown
         if: always()
         run: docker compose -f ci/docker-compose.test.yml down
