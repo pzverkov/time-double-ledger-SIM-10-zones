@@ -15,14 +15,24 @@ pub const MAX_DELIVER: i64 = 5;
 pub struct IncomingEvent {
     /// Dedup key. NATS carries it in the `Nats-Msg-Id` header; Kafka in the record key.
     pub msg_id: Option<String>,
+    /// W3C `traceparent` carried as a broker header, used to link the consumer
+    /// span to the originating request's trace. `None` when tracing is off.
+    pub traceparent: Option<String>,
     pub payload: Vec<u8>,
 }
 
 /// Publishes events to the broker.
 #[async_trait]
 pub trait EventPublisher: Send + Sync {
-    /// Publish `body` to `subject`, carrying `msg_id` for broker/consumer dedup.
-    async fn publish(&self, subject: &str, msg_id: &str, body: Vec<u8>) -> Result<(), BrokerError>;
+    /// Publish `body` to `subject`, carrying `msg_id` for broker/consumer dedup
+    /// and an optional W3C `traceparent` header for trace propagation.
+    async fn publish(
+        &self,
+        subject: &str,
+        msg_id: &str,
+        traceparent: Option<&str>,
+        body: Vec<u8>,
+    ) -> Result<(), BrokerError>;
 }
 
 /// Business logic for a single event. Broker-agnostic.

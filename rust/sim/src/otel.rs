@@ -11,9 +11,13 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 pub fn build_provider(endpoint: &str) -> Result<SdkTracerProvider, Box<dyn std::error::Error>> {
     use opentelemetry_otlp::WithExportConfig;
 
+    // A programmatic endpoint is used as-is (the SDK only appends the signal path
+    // when the endpoint comes from OTEL_EXPORTER_OTLP_ENDPOINT), so build the full
+    // traces URL ourselves.
+    let traces_endpoint = format!("{}/v1/traces", endpoint.trim_end_matches('/'));
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
-        .with_endpoint(endpoint)
+        .with_endpoint(traces_endpoint)
         .build()?;
 
     let provider = SdkTracerProvider::builder()

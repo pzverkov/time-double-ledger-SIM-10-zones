@@ -78,9 +78,23 @@ impl RedpandaPublisher {
 
 #[async_trait]
 impl EventPublisher for RedpandaPublisher {
-    async fn publish(&self, subject: &str, msg_id: &str, body: Vec<u8>) -> Result<(), BrokerError> {
+    async fn publish(
+        &self,
+        subject: &str,
+        msg_id: &str,
+        traceparent: Option<&str>,
+        body: Vec<u8>,
+    ) -> Result<(), BrokerError> {
         let topic = subject_to_topic(subject);
-        let record = FutureRecord::to(topic).key(msg_id).payload(&body);
+        let mut record = FutureRecord::to(topic).key(msg_id).payload(&body);
+        if let Some(tp) = traceparent {
+            record = record.headers(rdkafka::message::OwnedHeaders::new().insert(
+                rdkafka::message::Header {
+                    key: "traceparent",
+                    value: Some(tp),
+                },
+            ));
+        }
         self.producer
             .send(record, Duration::from_secs(5))
             .await
@@ -120,7 +134,9 @@ impl RedpandaConsumer {
 #[async_trait]
 impl EventConsumer for RedpandaConsumer {
     async fn run(&self, handler: Arc<dyn EventHandler>, cancel: CancellationToken) {
-        use rdkafka::message::Message;
+        use rdkafka::message::{Headers, Message};
+        use tracing::Instrument;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
         // Bound reprocessing of a poison message at one offset.
         let mut last_offset: i64 = -1;
         let mut attempts: i64 = 0;
@@ -139,12 +155,23 @@ impl EventConsumer for RedpandaConsumer {
 
             let partition = msg.partition();
             let offset = msg.offset();
+            let traceparent = msg.headers().and_then(|hs| {
+                hs.iter()
+                    .find(|h| h.key == "traceparent")
+                    .and_then(|h| h.value)
+                    .map(|v| String::from_utf8_lossy(v).into_owned())
+            });
             let event = IncomingEvent {
                 msg_id: msg.key().map(|k| String::from_utf8_lossy(k).into_owned()),
+                traceparent,
                 payload: msg.payload().map(|p| p.to_vec()).unwrap_or_default(),
             };
 
-            match handler.handle(&event).await {
+            let span = tracing::info_span!("consume", topic = %self.topic);
+            let _ = span.set_parent(crate::otel::context_from_traceparent(
+                event.traceparent.as_deref(),
+            ));
+            match handler.handle(&event).instrument(span).await {
                 Ok(()) => {
                     if let Err(e) = self.commit_offset(partition, offset) {
                         warn!(error = %e, "commit failed");

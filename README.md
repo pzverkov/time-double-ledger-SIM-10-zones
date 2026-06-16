@@ -7,7 +7,7 @@ A production-flavored simulation backend for a "time-currency" double-entry ledg
 - Fraud/ops incidents per zone with ACK/ASSIGN/RESOLVE lifecycle
 - Deterministic throttling via FNV-1a hashing (cross-language parity between Go and Rust)
 - **At-least-once** messaging with **Transactional Outbox** + **Inbox dedup**, behind a swappable broker seam (NATS JetStream default, Redpanda/Kafka-API via `--features redpanda`); two consumer groups (fraud + analytics). See [ADR 0001](docs/adr/0001-messaging-broker.md)
-- Observability: structured logs, Prometheus metrics, OpenTelemetry traces (Jaeger)
+- Observability: structured logs, Prometheus metrics, OpenTelemetry traces (Jaeger) with trace context propagated across the broker
 
 Two interchangeable backends with full feature parity:
 - `go/` (Go 1.26+) - primary implementation

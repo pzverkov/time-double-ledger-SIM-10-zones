@@ -1,7 +1,10 @@
 receivers:
   otlp:
     protocols:
+      # Bind to all interfaces so other containers can reach the receiver
+      # (collector 0.147+ defaults to localhost only).
       http:
+        endpoint: 0.0.0.0:4318
 
 exporters:
   otlphttp/jaeger:
