@@ -258,9 +258,11 @@ async fn apply_transfer_inner(
         "amount_units": amount_units,
         "created_at": fmt_rfc3339(created_at),
     });
+    // Capture the current trace context so consumers can link to this request.
+    let traceparent = crate::otel::current_traceparent();
     tx.execute(
-        "INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload) VALUES('TransferPosted','transaction',$1,$2)",
-        &[&txn_id, &payload],
+        "INSERT INTO outbox_events(event_type,aggregate_type,aggregate_id,payload,traceparent) VALUES('TransferPosted','transaction',$1,$2,$3)",
+        &[&txn_id, &payload, &traceparent],
     ).await?;
 
     Ok((txn_id, created_at))

@@ -80,6 +80,7 @@ mod tests {
         .unwrap();
         IncomingEvent {
             msg_id: Some(event_id.to_string()),
+            traceparent: None,
             payload: body,
         }
     }

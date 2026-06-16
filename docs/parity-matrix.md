@@ -39,7 +39,10 @@ currently ahead.
 | NATS JetStream | yes | yes (default) |
 | Redpanda / Kafka API | no | yes (`--features redpanda`) |
 | Explicit ack-on-success, bounded redelivery, poison drop | partial | yes |
+| Trace context propagated across the broker | no | yes |
 
 ## Observability (full parity)
 
 Structured JSON logs, Prometheus metrics, OpenTelemetry traces (OTLP -> Jaeger).
+The Rust backend additionally propagates the W3C trace context through the outbox
+and broker, so transfer and consumer spans share one trace.
