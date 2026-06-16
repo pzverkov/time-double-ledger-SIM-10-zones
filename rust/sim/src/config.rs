@@ -23,3 +23,12 @@ pub const DB_STATEMENT_TIMEOUT_MS: u32 = 15_000;
 /// Postgres `idle_in_transaction_session_timeout` applied to every pooled
 /// connection. Comfortably above `PUBLISH_TIMEOUT` * a small batch.
 pub const DB_IDLE_TX_TIMEOUT_MS: u32 = 30_000;
+
+/// How often the retention job prunes old rows.
+pub const RETENTION_INTERVAL: Duration = Duration::from_secs(3600);
+
+/// Published outbox rows and processed inbox rows older than this are deleted.
+pub const RETENTION_SECS: i64 = 7 * 24 * 3600;
+
+/// Dead-letter rows are kept longer for investigation.
+pub const DLQ_RETENTION_SECS: i64 = 30 * 24 * 3600;
