@@ -18,9 +18,11 @@ This is a demo, not a hardened production deployment. Known posture:
 
 - **Default credentials** in `infra/docker-compose.yml` (`postgres/postgres`,
   `admin/admin`, `dev-admin-key`) are for local development only and must be
-  overridden in any shared environment.
-- **Message bus** (NATS, Redpanda) runs PLAINTEXT with no auth in the dev stack;
-  a real deployment needs SASL/TLS and credentials.
+  overridden in any shared environment. Both backends refuse to start when
+  `APP_ENV=production` and `ADMIN_KEY` is unset or a known weak default.
+- **Message bus** (NATS, Redpanda) runs PLAINTEXT with no auth in the dev stack.
+  Auth and TLS are configurable: NATS user/password and `tls://` are carried by
+  `NATS_URL`, and `NATS_CREDS` points at a JWT/nkey credentials file.
 - **No rate limiting** on the public API endpoints in the dev configuration.
 - Operator endpoints (zone controls, snapshot/restore) require the `ADMIN_KEY`
   header.
@@ -28,3 +30,16 @@ This is a demo, not a hardened production deployment. Known posture:
 
 Automated scanning runs in CI: CodeQL, `govulncheck` (Go), `cargo audit` (Rust),
 and `npm audit` (web).
+
+## Production hardening checklist
+
+Before exposing this beyond a local machine:
+
+- Set `APP_ENV=production` so the backends reject a weak/unset `ADMIN_KEY`.
+- Replace every default in `infra/.env.example` with strong, unique secrets
+  (`POSTGRES_PASSWORD`, `ADMIN_KEY`, `GRAFANA_ADMIN_PASSWORD`) sourced from a
+  secret manager, not committed to the repo.
+- Enable broker auth/TLS: supply `NATS_CREDS` or an authenticated `NATS_URL`
+  (`tls://`); for Redpanda, configure SASL/TLS on the brokers.
+- Require TLS to Postgres (`sslmode=require` or stricter in `DATABASE_URL`).
+- Put the public API behind a gateway that enforces rate limiting and TLS.

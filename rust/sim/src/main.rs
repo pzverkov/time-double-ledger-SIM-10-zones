@@ -42,11 +42,19 @@ async fn build_messaging(
             // startup (a common compose/orchestration race) does not permanently
             // disable messaging. This runs in a background task, so waiting here
             // never blocks the API from serving.
-            let nc = match async_nats::ConnectOptions::new()
-                .retry_on_initial_connect()
-                .connect(&nats_url)
-                .await
-            {
+            // Auth/TLS: user/password and tls:// are carried by NATS_URL; NATS_CREDS
+            // (a JWT/nkey credentials file) is the standard production mechanism.
+            let mut opts = async_nats::ConnectOptions::new().retry_on_initial_connect();
+            if let Ok(creds) = env::var("NATS_CREDS") {
+                opts = match opts.credentials_file(&creds).await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        warn!(error = %e, path = %creds, "NATS_CREDS unreadable, messaging disabled");
+                        return None;
+                    }
+                };
+            }
+            let nc = match opts.connect(&nats_url).await {
                 Ok(nc) => nc,
                 Err(e) => {
                     warn!(error = %e, "NATS connection failed, messaging disabled");
@@ -138,6 +146,11 @@ async fn main() {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL required");
     let port = env::var("PORT").unwrap_or_else(|_| "8081".into());
     let admin_key = env::var("ADMIN_KEY").ok();
+    let app_env = env::var("APP_ENV").unwrap_or_default();
+    if let Err(e) = time_ledger_sim_rust::config::check_admin_key(&app_env, admin_key.as_deref()) {
+        eprintln!("fatal: insecure configuration: {e}");
+        std::process::exit(1);
+    }
 
     let (registry, metrics_state) = init_metrics();
 
