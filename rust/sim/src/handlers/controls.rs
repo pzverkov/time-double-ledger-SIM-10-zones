@@ -4,6 +4,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::config::THROTTLE_MAX_PCT;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::util::fmt_rfc3339;
@@ -81,10 +82,10 @@ pub async fn set_zone_controls(
     Json(req): Json<SetZoneControlsRequest>,
 ) -> Result<Json<ZoneControls>, AppError> {
     let wb = req.writes_blocked.unwrap_or(false);
-    let throttle = req.cross_zone_throttle.unwrap_or(100);
+    let throttle = req.cross_zone_throttle.unwrap_or(THROTTLE_MAX_PCT);
     let spool = req.spool_enabled.unwrap_or(false);
 
-    if !(0..=100).contains(&throttle) {
+    if !(0..=THROTTLE_MAX_PCT).contains(&throttle) {
         return Err(AppError::BadRequest(
             "cross_zone_throttle must be 0-100".into(),
         ));

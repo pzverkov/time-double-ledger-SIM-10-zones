@@ -1,7 +1,6 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -35,19 +34,14 @@ fn format_incident(r: &tokio_postgres::Row) -> serde_json::Value {
 pub async fn list_incidents_by_zone(
     State(st): State<AppState>,
     Path(zone_id): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let client = st
-        .db
-        .get()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<serde_json::Value>, AppError> {
+    let client = st.db.get().await?;
     let rows = client
         .query(
             "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE zone_id=$1 ORDER BY detected_at DESC LIMIT 200",
             &[&zone_id],
         )
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .await?;
 
     let incs: Vec<serde_json::Value> = rows.iter().map(format_incident).collect();
     Ok(Json(json!({ "incidents": incs })))
@@ -73,19 +67,15 @@ pub async fn list_recent_incidents(
 pub async fn get_incident(
     State(st): State<AppState>,
     Path(incident_id): Path<String>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let client = st
-        .db
-        .get()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+) -> Result<Json<serde_json::Value>, AppError> {
+    let client = st.db.get().await?;
     let row = client
         .query_one(
             "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::text::uuid",
             &[&incident_id],
         )
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|_| AppError::NotFound("incident not found".into()))?;
 
     Ok(Json(format_incident(&row)))
 }

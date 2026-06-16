@@ -3,7 +3,9 @@ use axum::{
     extract::{Path, State},
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
+use crate::config::THROTTLE_MAX_PCT;
 use crate::error::AppError;
 use crate::handlers::transfers::{TransferInput, apply_transfer_bypass};
 use crate::state::AppState;
@@ -84,7 +86,7 @@ pub async fn replay_spool(
                 r.get::<_, i32>("cross_zone_throttle"),
             )
         })
-        .unwrap_or((false, 100));
+        .unwrap_or((false, THROTTLE_MAX_PCT));
 
     if status == "DOWN" || wb || throttle == 0 {
         return Err(AppError::Conflict("zone not ready for replay".into()));
@@ -128,33 +130,42 @@ pub async fn replay_spool(
         match result {
             Ok(_) => {
                 applied += 1;
-                let _ = client
+                if let Err(e) = client
                     .execute(
                         "UPDATE spooled_transfers SET status='APPLIED', updated_at=now(), applied_at=now(), fail_reason=NULL WHERE id=$1::text::uuid",
                         &[&spool_id],
                     )
-                    .await;
+                    .await
+                {
+                    warn!(error = %e, spool_id, "failed to mark spooled transfer APPLIED");
+                }
             }
             Err(e) => {
                 failed += 1;
                 let reason = format!("{e:?}");
-                let _ = client
+                if let Err(e) = client
                     .execute(
                         "UPDATE spooled_transfers SET status='FAILED', updated_at=now(), fail_reason=$2 WHERE id=$1::text::uuid",
                         &[&spool_id, &reason],
                     )
-                    .await;
+                    .await
+                {
+                    warn!(error = %e, spool_id, "failed to mark spooled transfer FAILED");
+                }
             }
         }
     }
 
     // audit summary
-    let _ = client
+    if let Err(e) = client
         .execute(
             "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'REPLAY_SPOOL','zone',$2,$3, jsonb_build_object('applied',$4::bigint,'failed',$5::bigint,'limit',$6::bigint))",
             &[&req.actor, &zone_id, &req.reason, &applied, &failed, &limit],
         )
-        .await;
+        .await
+    {
+        warn!(error = %e, %zone_id, "failed to write spool replay audit log");
+    }
 
     Ok(Json(ReplayResult {
         zone_id,
