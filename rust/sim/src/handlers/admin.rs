@@ -7,6 +7,7 @@ use axum::{
 use serde_json::json;
 use std::env;
 
+use crate::config::THROTTLE_MAX_PCT;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::util::fmt_rfc3339;
@@ -43,19 +44,17 @@ pub async fn metrics(State(st): State<AppState>) -> impl IntoResponse {
     (StatusCode::OK, String::from_utf8_lossy(&buf).to_string())
 }
 
-pub fn admin_guard(st: &AppState, headers: &HeaderMap) -> Result<(), StatusCode> {
+pub fn admin_guard(st: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    // Preserves the existing 400 response for an unauthorized admin call.
+    let forbidden = || AppError::BadRequest("forbidden".into());
     match &st.admin_key {
-        None => Err(StatusCode::FORBIDDEN),
+        None => Err(forbidden()),
         Some(k) => {
             let got = headers
                 .get("x-admin-key")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            if got == k {
-                Ok(())
-            } else {
-                Err(StatusCode::FORBIDDEN)
-            }
+            if got == k { Ok(()) } else { Err(forbidden()) }
         }
     }
 }
@@ -64,7 +63,7 @@ pub async fn snapshot(
     State(st): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    admin_guard(&st, &headers).map_err(|_| AppError::BadRequest("forbidden".into()))?;
+    admin_guard(&st, &headers)?;
     let client = st.db.get().await?;
 
     let mut snap = json!({
@@ -145,7 +144,7 @@ pub async fn restore(
     headers: HeaderMap,
     Json(snap): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    admin_guard(&st, &headers).map_err(|_| AppError::BadRequest("forbidden".into()))?;
+    admin_guard(&st, &headers)?;
     let mut client = st.db.get().await?;
     let tx = client.transaction().await?;
 
@@ -198,7 +197,8 @@ pub async fn restore(
             let thr = c
                 .get("cross_zone_throttle")
                 .and_then(|v| v.as_i64())
-                .unwrap_or(100) as i32;
+                .map(|n| n as i32)
+                .unwrap_or(THROTTLE_MAX_PCT);
             let sp = c
                 .get("spool_enabled")
                 .and_then(|v| v.as_bool())
