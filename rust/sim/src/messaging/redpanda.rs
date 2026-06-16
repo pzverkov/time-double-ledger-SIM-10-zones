@@ -23,6 +23,7 @@ use super::broker::{
     BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, MAX_DELIVER,
     SUBJECT_TRANSFER_POSTED,
 };
+use super::store::DeadLetterStore;
 use super::{analytics, fraud};
 
 type Publisher = Arc<dyn EventPublisher>;
@@ -34,14 +35,26 @@ pub fn subject_to_topic(subject: &str) -> &str {
 }
 
 /// Build a publisher and the two consumer groups against `brokers`.
-pub async fn build(brokers: &str) -> Result<(Publisher, ConsumerArc, ConsumerArc), BrokerError> {
+pub async fn build(
+    brokers: &str,
+    dlq: Arc<dyn DeadLetterStore>,
+) -> Result<(Publisher, ConsumerArc, ConsumerArc), BrokerError> {
     let topic = subject_to_topic(SUBJECT_TRANSFER_POSTED).to_string();
     ensure_topic(brokers, &topic).await?;
 
     let publisher: Publisher = Arc::new(RedpandaPublisher::new(brokers)?);
-    let fraud_c: ConsumerArc = Arc::new(RedpandaConsumer::new(brokers, fraud::CONSUMER, &topic)?);
-    let analytics_c: ConsumerArc =
-        Arc::new(RedpandaConsumer::new(brokers, analytics::CONSUMER, &topic)?);
+    let fraud_c: ConsumerArc = Arc::new(RedpandaConsumer::new(
+        brokers,
+        fraud::CONSUMER,
+        &topic,
+        dlq.clone(),
+    )?);
+    let analytics_c: ConsumerArc = Arc::new(RedpandaConsumer::new(
+        brokers,
+        analytics::CONSUMER,
+        &topic,
+        dlq,
+    )?);
     Ok((publisher, fraud_c, analytics_c))
 }
 
@@ -106,10 +119,17 @@ impl EventPublisher for RedpandaPublisher {
 pub struct RedpandaConsumer {
     consumer: StreamConsumer,
     topic: String,
+    group_id: String,
+    dlq: Arc<dyn DeadLetterStore>,
 }
 
 impl RedpandaConsumer {
-    pub fn new(brokers: &str, group_id: &str, topic: &str) -> Result<Self, BrokerError> {
+    pub fn new(
+        brokers: &str,
+        group_id: &str,
+        topic: &str,
+        dlq: Arc<dyn DeadLetterStore>,
+    ) -> Result<Self, BrokerError> {
         let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", brokers)
             .set("group.id", group_id)
@@ -120,6 +140,8 @@ impl RedpandaConsumer {
         Ok(Self {
             consumer,
             topic: topic.to_string(),
+            group_id: group_id.to_string(),
+            dlq,
         })
     }
 
@@ -187,10 +209,29 @@ impl EventConsumer for RedpandaConsumer {
                     };
                     last_offset = offset;
                     if attempts >= MAX_DELIVER {
-                        warn!(error = %e, offset, attempts, "poison message, committing to drop");
-                        let _ = self.commit_offset(partition, offset);
-                        last_offset = -1;
-                        attempts = 0;
+                        // Dead-letter, then commit past it. If the DLQ write fails,
+                        // leave the offset uncommitted so it is retried, not lost.
+                        match self
+                            .dlq
+                            .dead_letter(
+                                &self.group_id,
+                                event.msg_id.as_deref(),
+                                &event.payload,
+                                &e.to_string(),
+                                attempts,
+                            )
+                            .await
+                        {
+                            Ok(()) => {
+                                warn!(error = %e, offset, attempts, "poison message dead-lettered");
+                                let _ = self.commit_offset(partition, offset);
+                                last_offset = -1;
+                                attempts = 0;
+                            }
+                            Err(dlq_err) => {
+                                warn!(error = %dlq_err, offset, "dead-letter write failed, will retry");
+                            }
+                        }
                     } else {
                         warn!(error = %e, offset, attempts, "handler failed, seeking back to reprocess");
                         let _ = self.consumer.seek(
