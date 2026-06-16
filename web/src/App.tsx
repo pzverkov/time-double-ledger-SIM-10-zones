@@ -248,7 +248,7 @@ export default function App() {
     setBusy(true);
     try {
       await api(`/v1/zones/${selectedZone.id}/status`, { method: "POST", body: { status, actor, reason } });
-      toast("Zone status updated", `${selectedZone.name} → ${status}`);
+      toast("Zone status updated", `${selectedZone.name} -> ${status}`);
       await refreshAll();
     } catch (e: any) {
       toast("Zone status failed", String(e?.message || e));
@@ -326,9 +326,9 @@ export default function App() {
       });
 
       if (res?.status === "SPOOLED") {
-        toast("Transfer spooled", `zone blocked; queued as ${String(res.spool_id).slice(0, 8)}…`);
+        toast("Transfer spooled", `zone blocked; queued as ${String(res.spool_id).slice(0, 8)}...`);
       } else {
-        toast("Transfer applied", `${fmtUnits(amount)} ${from} → ${to}`);
+        toast("Transfer applied", `${fmtUnits(amount)} ${from} -> ${to}`);
       }
 
       await Promise.all([loadBalances(), loadTxns(), loadAllIncidents(), loadZoneDrilldown(zoneId)]);
@@ -370,7 +370,7 @@ export default function App() {
           reason,
         },
       });
-      toast("Incident updated", `${incidentManage.id.slice(0, 8)}… ${action}`);
+      toast("Incident updated", `${incidentManage.id.slice(0, 8)}... ${action}`);
       setIncidentManage(null);
       setIncidentAssignee("");
       setIncidentNote("");
@@ -446,7 +446,7 @@ export default function App() {
         <div className="container" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div className="hgroup">
             <h1>Time Ledger Operator Console</h1>
-            <div className="sub">Ledger + zones + incidents • idempotent • outbox/inbox • blast radius</div>
+            <div className="sub">Ledger + zones + incidents | idempotent | outbox/inbox | blast radius</div>
           </div>
 
           <div className="toolbar">
@@ -507,7 +507,7 @@ export default function App() {
                 {selectedZone ? (
                   <span className={`badge ${clsStatus(selectedZone.status)}`}>
                     <span className="dot" />
-                    {selectedZone.name} (#{zoneNumber(selectedZone.id)}) • {selectedZone.status}
+                    {selectedZone.name} (#{zoneNumber(selectedZone.id)}) | {selectedZone.status}
                   </span>
                 ) : <span className="small">Select a zone</span>}
               </div>
@@ -583,7 +583,7 @@ export default function App() {
                   <div className="card-h">
                     <h2>Controls</h2>
                     <div className="kv">
-                      {controls ? <span className="small mono">spool {String(controls.spool_enabled)} • throttle {controls.cross_zone_throttle}%</span> : <span className="small">…</span>}
+                      {controls ? <span className="small mono">spool {String(controls.spool_enabled)} | throttle {controls.cross_zone_throttle}%</span> : <span className="small">...</span>}
                     </div>
                   </div>
                   <div className="card-b">
@@ -637,7 +637,7 @@ export default function App() {
                   <div className="card-h">
                     <h2>Spool</h2>
                     <div className="kv">
-                      {spool ? <span className="small">pending {spool.pending} • applied {spool.applied} • failed {spool.failed}</span> : <span className="small">…</span>}
+                      {spool ? <span className="small">pending {spool.pending} | applied {spool.applied} | failed {spool.failed}</span> : <span className="small">...</span>}
                     </div>
                   </div>
                   <div className="card-b">
@@ -663,7 +663,7 @@ export default function App() {
                     </div>
                     {spool && spool.pending > 0 && (selectedZone?.status === "DOWN" || controls?.writes_blocked || (controls?.cross_zone_throttle ?? 100) === 0) ? (
                       <div className="small" style={{ marginTop: 8 }}>
-                        ⚠ Zone still contained. Replay will fail until the zone is OK and unblocked.
+                        (!) Zone still contained. Replay will fail until the zone is OK and unblocked.
                       </div>
                     ) : null}
                   </div>
@@ -783,13 +783,13 @@ export default function App() {
             <div className="card-h"><h2>Recent transactions</h2><div className="kv"><span className="small">{txns.length} rows</span></div></div>
             <div className="card-b">
               <table className="table">
-                <thead><tr><th>Time</th><th className="mono">Txn</th><th>From → To</th><th>Amount</th><th>Zone</th><th></th></tr></thead>
+                <thead><tr><th>Time</th><th className="mono">Txn</th><th>From -> To</th><th>Amount</th><th>Zone</th><th></th></tr></thead>
                 <tbody>
                   {txns.map(t => (
                     <tr key={t.id}>
                       <td className="small">{fmtRfc3339(t.created_at)}</td>
                       <td className="mono">{t.id.slice(0, 8)}</td>
-                      <td className="small mono">{t.from_account} → {t.to_account}</td>
+                      <td className="small mono">{t.from_account} -> {t.to_account}</td>
                       <td>{fmtUnits(t.amount_units)}</td>
                       <td className="small mono">{t.zone_id}</td>
                       <td style={{ textAlign: "right" }}><button className="btn" onClick={() => viewTxn(t.id)}>View</button></td>
@@ -816,9 +816,9 @@ export default function App() {
       ) : null}
 
       {incidentManage ? (
-        <Modal title={`Manage incident ${incidentManage.id.slice(0, 8)}…`} onClose={() => setIncidentManage(null)}>
+        <Modal title={`Manage incident ${incidentManage.id.slice(0, 8)}...`} onClose={() => setIncidentManage(null)}>
           <div className="small" style={{ marginBottom: 10 }}>
-            {incidentManage.title} • <span className="mono">{incidentManage.status}</span> • <span className="mono">{incidentManage.zone_id}</span>
+            {incidentManage.title} | <span className="mono">{incidentManage.status}</span> | <span className="mono">{incidentManage.zone_id}</span>
           </div>
 
           <div className="formRow" style={{ marginBottom: 10 }}>
@@ -833,7 +833,7 @@ export default function App() {
           </div>
 
           <div className="small" style={{ marginTop: 10 }}>
-            Incident actions are audited. This is a sim, so “assignment” just writes metadata.
+            Incident actions are audited. This is a sim, so "assignment" just writes metadata.
           </div>
         </Modal>
       ) : null}
