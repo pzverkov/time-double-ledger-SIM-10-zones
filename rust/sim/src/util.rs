@@ -90,7 +90,10 @@ mod tests {
         }
         // each decile should get roughly 1000; fail if any is < 500 (extreme skew)
         for (i, count) in buckets.iter().enumerate() {
-            assert!(*count > 500, "bucket {i} has only {count} entries, distribution is skewed");
+            assert!(
+                *count > 500,
+                "bucket {i} has only {count} entries, distribution is skewed"
+            );
         }
     }
 
@@ -116,24 +119,45 @@ mod tests {
     #[test]
     fn payload_hash_deterministic() {
         #[derive(serde::Serialize)]
-        struct Req { id: String, amount: i64 }
-        let r1 = Req { id: "x".into(), amount: 100 };
-        let r2 = Req { id: "x".into(), amount: 100 };
+        struct Req {
+            id: String,
+            amount: i64,
+        }
+        let r1 = Req {
+            id: "x".into(),
+            amount: 100,
+        };
+        let r2 = Req {
+            id: "x".into(),
+            amount: 100,
+        };
         assert_eq!(payload_hash(&r1).unwrap(), payload_hash(&r2).unwrap());
     }
 
     #[test]
     fn payload_hash_different_input() {
         #[derive(serde::Serialize)]
-        struct Req { id: String, amount: i64 }
-        let r1 = Req { id: "x".into(), amount: 100 };
-        let r2 = Req { id: "x".into(), amount: 200 };
+        struct Req {
+            id: String,
+            amount: i64,
+        }
+        let r1 = Req {
+            id: "x".into(),
+            amount: 100,
+        };
+        let r2 = Req {
+            id: "x".into(),
+            amount: 200,
+        };
         assert_ne!(payload_hash(&r1).unwrap(), payload_hash(&r2).unwrap());
     }
 
     #[test]
     fn sha256_hex_known_value() {
         // SHA256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-        assert_eq!(sha256_hex(b""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 }

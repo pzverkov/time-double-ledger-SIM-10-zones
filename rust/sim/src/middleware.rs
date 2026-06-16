@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, HeaderValue, Method, StatusCode},
+    http::{HeaderValue, Method, StatusCode, header},
     middleware::Next,
     response::Response,
 };
@@ -21,7 +21,11 @@ pub async fn cors(req: Request, next: Next) -> Response {
         if allow_any {
             allowed_origin = Some(o);
         } else {
-            for a in allowed.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
+            for a in allowed
+                .split(',')
+                .map(|x| x.trim())
+                .filter(|x| !x.is_empty())
+            {
                 if a == o {
                     allowed_origin = Some(o);
                     break;

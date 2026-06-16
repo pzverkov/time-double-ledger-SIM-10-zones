@@ -23,5 +23,11 @@ pub fn init_metrics() -> (Arc<prometheus::Registry>, Arc<Metrics>) {
         prometheus::IntGauge::new("outbox_backlog", "Unpublished outbox rows").unwrap();
     reg.register(Box::new(transfers_total.clone())).unwrap();
     reg.register(Box::new(outbox_backlog.clone())).unwrap();
-    (Arc::new(reg), Arc::new(Metrics { transfers_total, outbox_backlog }))
+    (
+        Arc::new(reg),
+        Arc::new(Metrics {
+            transfers_total,
+            outbox_backlog,
+        }),
+    )
 }

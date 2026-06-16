@@ -1,4 +1,7 @@
-use axum::{extract::{Path, Query, State}, Json};
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -12,7 +15,9 @@ pub struct AuditQuery {
     pub limit: i64,
 }
 
-fn default_limit() -> i64 { 100 }
+fn default_limit() -> i64 {
+    100
+}
 
 #[derive(Serialize)]
 struct AuditEntry {

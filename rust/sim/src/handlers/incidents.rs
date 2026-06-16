@@ -1,4 +1,8 @@
-use axum::{extract::{Path, Query, State}, http::StatusCode, Json};
+use axum::{
+    Json,
+    extract::{Path, Query, State},
+    http::StatusCode,
+};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -11,7 +15,9 @@ pub struct IncidentQuery {
     #[serde(default = "default_limit")]
     pub limit: i64,
 }
-fn default_limit() -> i64 { 100 }
+fn default_limit() -> i64 {
+    100
+}
 
 fn format_incident(r: &tokio_postgres::Row) -> serde_json::Value {
     let dt: time::OffsetDateTime = r.get("detected_at");
@@ -30,7 +36,11 @@ pub async fn list_incidents_by_zone(
     State(st): State<AppState>,
     Path(zone_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client = st
+        .db
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let rows = client
         .query(
             "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE zone_id=$1 ORDER BY detected_at DESC LIMIT 200",
@@ -64,7 +74,11 @@ pub async fn get_incident(
     State(st): State<AppState>,
     Path(incident_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let client = st.db.get().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let client = st
+        .db
+        .get()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let row = client
         .query_one(
             "SELECT id::text, zone_id, severity, status, title, details, detected_at FROM incidents WHERE id=$1::text::uuid",
@@ -98,7 +112,9 @@ pub async fn apply_incident_action(
         return Err(AppError::BadRequest("actor required".into()));
     }
     if req.action != "ACK" && req.action != "ASSIGN" && req.action != "RESOLVE" {
-        return Err(AppError::BadRequest("action must be ACK, ASSIGN, or RESOLVE".into()));
+        return Err(AppError::BadRequest(
+            "action must be ACK, ASSIGN, or RESOLVE".into(),
+        ));
     }
     if req.action == "ASSIGN" && req.assignee.is_empty() {
         return Err(AppError::BadRequest("assignee required for ASSIGN".into()));
@@ -120,7 +136,9 @@ pub async fn apply_incident_action(
 
     // mutate details
     if req.action == "ASSIGN" {
-        details.as_object_mut().map(|m| m.insert("assignee".into(), json!(req.assignee)));
+        details
+            .as_object_mut()
+            .map(|m| m.insert("assignee".into(), json!(req.assignee)));
     }
     if !req.note.is_empty() {
         let entry = json!({
@@ -131,11 +149,18 @@ pub async fn apply_incident_action(
         });
         let notes = details
             .as_object_mut()
-            .and_then(|m| m.entry("notes").or_insert(json!([])).as_array_mut().cloned())
+            .and_then(|m| {
+                m.entry("notes")
+                    .or_insert(json!([]))
+                    .as_array_mut()
+                    .cloned()
+            })
             .unwrap_or_default();
         let mut notes = notes;
         notes.push(entry);
-        details.as_object_mut().map(|m| m.insert("notes".into(), json!(notes)));
+        details
+            .as_object_mut()
+            .map(|m| m.insert("notes".into(), json!(notes)));
     }
 
     let new_status = match req.action.as_str() {

@@ -22,7 +22,11 @@ impl AnalyticsHandler {
 impl EventHandler for AnalyticsHandler {
     async fn handle(&self, event: &IncomingEvent) -> Result<(), BrokerError> {
         let ev: TransferPosted = serde_json::from_slice(&event.payload)?;
-        let event_id = ev.event_id.clone().or_else(|| event.msg_id.clone()).unwrap_or_default();
+        let event_id = ev
+            .event_id
+            .clone()
+            .or_else(|| event.msg_id.clone())
+            .unwrap_or_default();
         if event_id.is_empty() {
             return Ok(());
         }
@@ -36,8 +40,8 @@ impl EventHandler for AnalyticsHandler {
 
 #[cfg(test)]
 mod tests {
+    use super::super::store::{ZoneStat, fold_stats};
     use super::*;
-    use super::super::store::{fold_stats, ZoneStat};
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
@@ -50,7 +54,12 @@ mod tests {
 
     #[async_trait]
     impl AnalyticsStore for FakeAnalyticsStore {
-        async fn record_stats(&self, event_id: &str, zone_id: &str, amount: i64) -> Result<bool, BrokerError> {
+        async fn record_stats(
+            &self,
+            event_id: &str,
+            zone_id: &str,
+            amount: i64,
+        ) -> Result<bool, BrokerError> {
             if self.fail {
                 return Err("store boom".into());
             }
@@ -69,7 +78,10 @@ mod tests {
             "event_id": event_id, "zone_id": zone, "amount_units": amount,
         }))
         .unwrap();
-        IncomingEvent { msg_id: Some(event_id.to_string()), payload: body }
+        IncomingEvent {
+            msg_id: Some(event_id.to_string()),
+            payload: body,
+        }
     }
 
     #[tokio::test]
@@ -80,8 +92,20 @@ mod tests {
         h.handle(&event("e2", "zone-eu", 50)).await.unwrap();
         h.handle(&event("e3", "zone-na", 10)).await.unwrap();
         let stats = store.stats.lock().unwrap();
-        assert_eq!(stats["zone-eu"], ZoneStat { event_count: 2, total_amount_units: 150 });
-        assert_eq!(stats["zone-na"], ZoneStat { event_count: 1, total_amount_units: 10 });
+        assert_eq!(
+            stats["zone-eu"],
+            ZoneStat {
+                event_count: 2,
+                total_amount_units: 150
+            }
+        );
+        assert_eq!(
+            stats["zone-na"],
+            ZoneStat {
+                event_count: 1,
+                total_amount_units: 10
+            }
+        );
     }
 
     #[tokio::test]
@@ -90,12 +114,21 @@ mod tests {
         let h = AnalyticsHandler::new(store.clone());
         h.handle(&event("e1", "zone-eu", 100)).await.unwrap();
         h.handle(&event("e1", "zone-eu", 100)).await.unwrap();
-        assert_eq!(store.stats.lock().unwrap()["zone-eu"], ZoneStat { event_count: 1, total_amount_units: 100 });
+        assert_eq!(
+            store.stats.lock().unwrap()["zone-eu"],
+            ZoneStat {
+                event_count: 1,
+                total_amount_units: 100
+            }
+        );
     }
 
     #[tokio::test]
     async fn store_error_propagates() {
-        let store = Arc::new(FakeAnalyticsStore { fail: true, ..Default::default() });
+        let store = Arc::new(FakeAnalyticsStore {
+            fail: true,
+            ..Default::default()
+        });
         let h = AnalyticsHandler::new(store);
         assert!(h.handle(&event("e1", "zone-eu", 100)).await.is_err());
     }

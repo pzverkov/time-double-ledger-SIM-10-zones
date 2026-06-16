@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -43,7 +43,9 @@ pub async fn create_transfer(
     Json(req): Json<CreateTransferRequest>,
 ) -> Result<axum::response::Response, AppError> {
     if req.amount_units <= 0 || req.request_id.is_empty() || req.zone_id.is_empty() {
-        return Err(AppError::BadRequest("missing required fields or invalid amount".into()));
+        return Err(AppError::BadRequest(
+            "missing required fields or invalid amount".into(),
+        ));
     }
     let hash = payload_hash(&req)?;
     let mut client = st.db.get().await?;
@@ -67,7 +69,8 @@ pub async fn create_transfer(
         Some("zone down")
     } else if wb {
         Some("writes blocked")
-    } else if throttle < 100 && (throttle <= 0 || hash_percent(&req.request_id) >= throttle as u32) {
+    } else if throttle < 100 && (throttle <= 0 || hash_percent(&req.request_id) >= throttle as u32)
+    {
         Some("throttled")
     } else {
         None
@@ -75,12 +78,17 @@ pub async fn create_transfer(
 
     // idempotency check (transactions table)
     let existing = tx
-        .query_opt("SELECT id::text, payload_hash, created_at FROM transactions WHERE request_id=$1", &[&req.request_id])
+        .query_opt(
+            "SELECT id::text, payload_hash, created_at FROM transactions WHERE request_id=$1",
+            &[&req.request_id],
+        )
         .await?;
     if let Some(r) = existing {
         let ph: String = r.get(1);
         if ph != hash {
-            return Err(AppError::Conflict("idempotency conflict: same request_id, different payload".into()));
+            return Err(AppError::Conflict(
+                "idempotency conflict: same request_id, different payload".into(),
+            ));
         }
         tx.commit().await?;
         let created_at: time::OffsetDateTime = r.get(2);
@@ -89,24 +97,34 @@ pub async fn create_transfer(
             transaction_id: r.get(0),
             request_id: req.request_id,
             created_at: fmt_rfc3339(created_at),
-        }).into_response());
+        })
+        .into_response());
     }
 
     // idempotency check (spooled_transfers table)
     let existing_spool = tx
-        .query_opt("SELECT id::text, payload_hash FROM spooled_transfers WHERE request_id=$1", &[&req.request_id])
+        .query_opt(
+            "SELECT id::text, payload_hash FROM spooled_transfers WHERE request_id=$1",
+            &[&req.request_id],
+        )
         .await?;
     if let Some(r) = existing_spool {
         let ph: String = r.get(1);
         if ph != hash {
-            return Err(AppError::Conflict("idempotency conflict: same request_id, different payload".into()));
+            return Err(AppError::Conflict(
+                "idempotency conflict: same request_id, different payload".into(),
+            ));
         }
         tx.commit().await?;
-        return Ok((StatusCode::ACCEPTED, Json(SpooledResponse {
-            status: "SPOOLED".into(),
-            spool_id: r.get(0),
-            request_id: req.request_id,
-        })).into_response());
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(SpooledResponse {
+                status: "SPOOLED".into(),
+                spool_id: r.get(0),
+                request_id: req.request_id,
+            }),
+        )
+            .into_response());
     }
 
     // blocked? spool or reject
@@ -126,11 +144,15 @@ pub async fn create_transfer(
             ).await?;
 
             tx.commit().await?;
-            return Ok((StatusCode::ACCEPTED, Json(SpooledResponse {
-                status: "SPOOLED".into(),
-                spool_id,
-                request_id: req.request_id,
-            })).into_response());
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(SpooledResponse {
+                    status: "SPOOLED".into(),
+                    spool_id,
+                    request_id: req.request_id,
+                }),
+            )
+                .into_response());
         }
 
         return if status == "DOWN" {
@@ -144,17 +166,27 @@ pub async fn create_transfer(
     tx.execute(
         "INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
         &[&req.from_account, &req.zone_id],
-    ).await?;
+    )
+    .await?;
     tx.execute(
         "INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
         &[&req.to_account, &req.zone_id],
-    ).await?;
+    )
+    .await?;
 
-    let (txn_id, created_at) = apply_transfer_inner(&tx, &TransferInput {
-        request_id: &req.request_id, payload_hash: &hash,
-        from_account: &req.from_account, to_account: &req.to_account,
-        amount_units: req.amount_units, zone_id: &req.zone_id, metadata: &req.metadata,
-    }).await?;
+    let (txn_id, created_at) = apply_transfer_inner(
+        &tx,
+        &TransferInput {
+            request_id: &req.request_id,
+            payload_hash: &hash,
+            from_account: &req.from_account,
+            to_account: &req.to_account,
+            amount_units: req.amount_units,
+            zone_id: &req.zone_id,
+            metadata: &req.metadata,
+        },
+    )
+    .await?;
 
     tx.commit().await?;
     st.metrics.transfers_total.inc();
@@ -164,7 +196,8 @@ pub async fn create_transfer(
         transaction_id: txn_id,
         request_id: req.request_id,
         created_at: fmt_rfc3339(created_at),
-    }).into_response())
+    })
+    .into_response())
 }
 
 pub struct TransferInput<'a> {
@@ -181,7 +214,15 @@ async fn apply_transfer_inner(
     tx: &deadpool_postgres::Transaction<'_>,
     inp: &TransferInput<'_>,
 ) -> Result<(String, time::OffsetDateTime), AppError> {
-    let TransferInput { request_id, payload_hash: hash, from_account, to_account, amount_units, zone_id, metadata } = inp;
+    let TransferInput {
+        request_id,
+        payload_hash: hash,
+        from_account,
+        to_account,
+        amount_units,
+        zone_id,
+        metadata,
+    } = inp;
     let row = tx
         .query_one(
             "INSERT INTO transactions(request_id,payload_hash,from_account,to_account,amount_units,zone_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at",
@@ -229,13 +270,23 @@ pub async fn apply_transfer_bypass(
     st: &AppState,
     inp: &TransferInput<'_>,
 ) -> Result<String, AppError> {
-    let TransferInput { request_id, payload_hash, from_account, to_account, zone_id, .. } = inp;
+    let TransferInput {
+        request_id,
+        payload_hash,
+        from_account,
+        to_account,
+        zone_id,
+        ..
+    } = inp;
     let mut client = st.db.get().await?;
     let tx = client.transaction().await?;
 
     // idempotency check
     let existing = tx
-        .query_opt("SELECT id::text, payload_hash FROM transactions WHERE request_id=$1", &[&request_id])
+        .query_opt(
+            "SELECT id::text, payload_hash FROM transactions WHERE request_id=$1",
+            &[&request_id],
+        )
         .await?;
     if let Some(r) = existing {
         let ph: String = r.get(1);
@@ -249,11 +300,13 @@ pub async fn apply_transfer_bypass(
     tx.execute(
         "INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
         &[&from_account, &zone_id],
-    ).await?;
+    )
+    .await?;
     tx.execute(
         "INSERT INTO accounts(id, zone_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
         &[&to_account, &zone_id],
-    ).await?;
+    )
+    .await?;
 
     let (txn_id, _) = apply_transfer_inner(&tx, inp).await?;
 

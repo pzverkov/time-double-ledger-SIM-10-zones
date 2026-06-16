@@ -1,16 +1,23 @@
-use axum::{middleware, routing::{get, post}, Router};
+use axum::{
+    Router, middleware,
+    routing::{get, post},
+};
 use std::sync::Arc;
 use std::{env, net::SocketAddr};
 use tokio_postgres::NoTls;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use time_ledger_sim_rust::handlers::{admin, audit, balances, controls, incidents, spool, transactions, transfers, zones};
-use time_ledger_sim_rust::messaging::broker::{EventConsumer, EventHandler, EventPublisher, SUBJECT_TRANSFER_POSTED};
+use time_ledger_sim_rust::handlers::{
+    admin, audit, balances, controls, incidents, spool, transactions, transfers, zones,
+};
+use time_ledger_sim_rust::messaging::broker::{
+    EventConsumer, EventHandler, EventPublisher, SUBJECT_TRANSFER_POSTED,
+};
 use time_ledger_sim_rust::messaging::store::PgStore;
 use time_ledger_sim_rust::messaging::{analytics, fraud, nats, outbox};
 use time_ledger_sim_rust::middleware::cors;
-use time_ledger_sim_rust::state::{init_metrics, AppState};
+use time_ledger_sim_rust::state::{AppState, init_metrics};
 
 type Publisher = Arc<dyn EventPublisher>;
 type Consumer = Arc<dyn EventConsumer>;
@@ -41,8 +48,16 @@ async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)
             }
             info!("NATS connected, starting outbox publisher and consumers");
             let publisher: Publisher = Arc::new(nats::NatsPublisher::new(js.clone()));
-            let fraud_c: Consumer = Arc::new(nats::NatsConsumer::new(js.clone(), fraud::CONSUMER, SUBJECT_TRANSFER_POSTED));
-            let analytics_c: Consumer = Arc::new(nats::NatsConsumer::new(js, analytics::CONSUMER, SUBJECT_TRANSFER_POSTED));
+            let fraud_c: Consumer = Arc::new(nats::NatsConsumer::new(
+                js.clone(),
+                fraud::CONSUMER,
+                SUBJECT_TRANSFER_POSTED,
+            ));
+            let analytics_c: Consumer = Arc::new(nats::NatsConsumer::new(
+                js,
+                analytics::CONSUMER,
+                SUBJECT_TRANSFER_POSTED,
+            ));
             Some((publisher, fraud_c, analytics_c))
         }
         #[cfg(feature = "redpanda")]
@@ -74,8 +89,8 @@ async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)
 }
 
 fn init_tracing() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "info".into());
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .json()
@@ -107,8 +122,10 @@ async fn main() {
     if let Some((publisher, fraud_c, analytics_c)) = build_messaging(&broker).await {
         let store = Arc::new(PgStore::new(pool.clone()));
         let outbox = outbox::OutboxPublisher::new(store.clone(), publisher);
-        let fraud_handler: Arc<dyn EventHandler> = Arc::new(fraud::FraudHandler::new(store.clone()));
-        let analytics_handler: Arc<dyn EventHandler> = Arc::new(analytics::AnalyticsHandler::new(store));
+        let fraud_handler: Arc<dyn EventHandler> =
+            Arc::new(fraud::FraudHandler::new(store.clone()));
+        let analytics_handler: Arc<dyn EventHandler> =
+            Arc::new(analytics::AnalyticsHandler::new(store));
         let (c1, c2, c3) = (cancel.clone(), cancel.clone(), cancel.clone());
         tokio::spawn(async move { outbox.run(c1).await });
         tokio::spawn(async move { fraud_c.run(fraud_handler, c2).await });
@@ -151,15 +168,30 @@ async fn main() {
         .route("/v1/transfers", post(transfers::create_transfer))
         .route("/v1/balances", get(balances::list_balances))
         .route("/v1/transactions", get(transactions::list_transactions))
-        .route("/v1/transactions/{transaction_id}", get(transactions::get_transaction))
+        .route(
+            "/v1/transactions/{transaction_id}",
+            get(transactions::get_transaction),
+        )
         .route("/v1/zones/{zone_id}/status", post(zones::set_zone_status))
-        .route("/v1/zones/{zone_id}/incidents", get(incidents::list_incidents_by_zone))
+        .route(
+            "/v1/zones/{zone_id}/incidents",
+            get(incidents::list_incidents_by_zone),
+        )
         .route("/v1/incidents", get(incidents::list_recent_incidents))
         .route("/v1/incidents/{incident_id}", get(incidents::get_incident))
-        .route("/v1/incidents/{incident_id}/action", post(incidents::apply_incident_action))
-        .route("/v1/zones/{zone_id}/controls", get(controls::get_zone_controls).post(controls::set_zone_controls))
+        .route(
+            "/v1/incidents/{incident_id}/action",
+            post(incidents::apply_incident_action),
+        )
+        .route(
+            "/v1/zones/{zone_id}/controls",
+            get(controls::get_zone_controls).post(controls::set_zone_controls),
+        )
         .route("/v1/zones/{zone_id}/spool", get(spool::get_spool_stats))
-        .route("/v1/zones/{zone_id}/spool/replay", post(spool::replay_spool))
+        .route(
+            "/v1/zones/{zone_id}/spool/replay",
+            post(spool::replay_spool),
+        )
         .route("/v1/zones/{zone_id}/audit", get(audit::list_audit))
         .route("/v1/sim/snapshot", post(admin::snapshot))
         .route("/v1/sim/restore", post(admin::restore))

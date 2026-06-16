@@ -20,8 +20,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::broker::{
-    BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, SUBJECT_TRANSFER_POSTED,
-    MAX_DELIVER,
+    BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, MAX_DELIVER,
+    SUBJECT_TRANSFER_POSTED,
 };
 use super::{analytics, fraud};
 
@@ -39,16 +39,16 @@ pub async fn build(brokers: &str) -> Result<(Publisher, ConsumerArc, ConsumerArc
     ensure_topic(brokers, &topic).await?;
 
     let publisher: Publisher = Arc::new(RedpandaPublisher::new(brokers)?);
-    let fraud_c: ConsumerArc =
-        Arc::new(RedpandaConsumer::new(brokers, fraud::CONSUMER, &topic)?);
+    let fraud_c: ConsumerArc = Arc::new(RedpandaConsumer::new(brokers, fraud::CONSUMER, &topic)?);
     let analytics_c: ConsumerArc =
         Arc::new(RedpandaConsumer::new(brokers, analytics::CONSUMER, &topic)?);
     Ok((publisher, fraud_c, analytics_c))
 }
 
 async fn ensure_topic(brokers: &str, topic: &str) -> Result<(), BrokerError> {
-    let admin: AdminClient<DefaultClientContext> =
-        ClientConfig::new().set("bootstrap.servers", brokers).create()?;
+    let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
+        .set("bootstrap.servers", brokers)
+        .create()?;
     let new = NewTopic::new(topic, 1, TopicReplication::Fixed(1));
     // Ignore "already exists"; surface anything else.
     let res = admin.create_topics([&new], &AdminOptions::new()).await?;
@@ -103,7 +103,10 @@ impl RedpandaConsumer {
             .set("auto.offset.reset", "earliest")
             .create()?;
         consumer.subscribe(&[topic])?;
-        Ok(Self { consumer, topic: topic.to_string() })
+        Ok(Self {
+            consumer,
+            topic: topic.to_string(),
+        })
     }
 
     fn commit_offset(&self, partition: i32, offset: i64) -> Result<(), BrokerError> {
@@ -150,7 +153,11 @@ impl EventConsumer for RedpandaConsumer {
                     attempts = 0;
                 }
                 Err(e) => {
-                    attempts = if offset == last_offset { attempts + 1 } else { 1 };
+                    attempts = if offset == last_offset {
+                        attempts + 1
+                    } else {
+                        1
+                    };
                     last_offset = offset;
                     if attempts >= MAX_DELIVER {
                         warn!(error = %e, offset, attempts, "poison message, committing to drop");
@@ -159,7 +166,12 @@ impl EventConsumer for RedpandaConsumer {
                         attempts = 0;
                     } else {
                         warn!(error = %e, offset, attempts, "handler failed, seeking back to reprocess");
-                        let _ = self.consumer.seek(&self.topic, partition, Offset::Offset(offset), Duration::from_secs(5));
+                        let _ = self.consumer.seek(
+                            &self.topic,
+                            partition,
+                            Offset::Offset(offset),
+                            Duration::from_secs(5),
+                        );
                     }
                 }
             }
@@ -173,6 +185,9 @@ mod tests {
 
     #[test]
     fn subject_maps_to_topic_identity() {
-        assert_eq!(subject_to_topic("events.transfer_posted"), "events.transfer_posted");
+        assert_eq!(
+            subject_to_topic("events.transfer_posted"),
+            "events.transfer_posted"
+        );
     }
 }

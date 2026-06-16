@@ -63,14 +63,23 @@ pub trait OutboxStore: Send + Sync {
 /// duplicate.
 #[async_trait]
 pub trait FraudStore: Send + Sync {
-    async fn record_fraud(&self, event_id: &str, incident: Option<&Incident>) -> Result<bool, BrokerError>;
+    async fn record_fraud(
+        &self,
+        event_id: &str,
+        incident: Option<&Incident>,
+    ) -> Result<bool, BrokerError>;
 }
 
 /// Analytics-consumer persistence. Inbox claim + zone aggregate update are
 /// atomic. Returns true if newly processed, false if a duplicate.
 #[async_trait]
 pub trait AnalyticsStore: Send + Sync {
-    async fn record_stats(&self, event_id: &str, zone_id: &str, amount_units: i64) -> Result<bool, BrokerError>;
+    async fn record_stats(
+        &self,
+        event_id: &str,
+        zone_id: &str,
+        amount_units: i64,
+    ) -> Result<bool, BrokerError>;
 }
 
 /// Postgres-backed implementation of all DB ports.
@@ -107,7 +116,10 @@ impl OutboxStore for PgStore {
     async fn mark_published(&self, id: &str) -> Result<(), BrokerError> {
         let client = self.db.get().await?;
         client
-            .execute("UPDATE outbox_events SET published_at=now() WHERE id=$1::text::uuid", &[&id])
+            .execute(
+                "UPDATE outbox_events SET published_at=now() WHERE id=$1::text::uuid",
+                &[&id],
+            )
             .await?;
         Ok(())
     }
@@ -115,7 +127,11 @@ impl OutboxStore for PgStore {
 
 #[async_trait]
 impl FraudStore for PgStore {
-    async fn record_fraud(&self, event_id: &str, incident: Option<&Incident>) -> Result<bool, BrokerError> {
+    async fn record_fraud(
+        &self,
+        event_id: &str,
+        incident: Option<&Incident>,
+    ) -> Result<bool, BrokerError> {
         let mut client = self.db.get().await?;
         let tx = client.transaction().await?;
         let claimed = tx
@@ -142,7 +158,12 @@ impl FraudStore for PgStore {
 
 #[async_trait]
 impl AnalyticsStore for PgStore {
-    async fn record_stats(&self, event_id: &str, zone_id: &str, amount_units: i64) -> Result<bool, BrokerError> {
+    async fn record_stats(
+        &self,
+        event_id: &str,
+        zone_id: &str,
+        amount_units: i64,
+    ) -> Result<bool, BrokerError> {
         let mut client = self.db.get().await?;
         let tx = client.transaction().await?;
         let claimed = tx
@@ -190,12 +211,21 @@ mod tests {
     fn fold_stats_accumulates() {
         let s = fold_stats(ZoneStat::default(), 100);
         let s = fold_stats(s, 50);
-        assert_eq!(s, ZoneStat { event_count: 2, total_amount_units: 150 });
+        assert_eq!(
+            s,
+            ZoneStat {
+                event_count: 2,
+                total_amount_units: 150
+            }
+        );
     }
 
     #[test]
     fn fold_stats_saturates_at_max() {
-        let prev = ZoneStat { event_count: i64::MAX, total_amount_units: i64::MAX };
+        let prev = ZoneStat {
+            event_count: i64::MAX,
+            total_amount_units: i64::MAX,
+        };
         let s = fold_stats(prev, 1000);
         assert_eq!(s.event_count, i64::MAX);
         assert_eq!(s.total_amount_units, i64::MAX);
