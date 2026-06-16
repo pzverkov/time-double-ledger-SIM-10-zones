@@ -10,7 +10,7 @@ We start with:
 
 ---
 
-## 0) One minute sanity rules (don’t skip)
+## 0) One minute sanity rules (don't skip)
 
 - **Never commit secrets** (DB passwords, admin keys, private keys).
 - **Operator endpoints are protected** by `ADMIN_KEY`.
@@ -242,7 +242,7 @@ No code changes. Only config.
 
 - Turning on HA DB too early (doubles cost).
 - Running multiple regions 24/7 without need (baseline cost multiplies).
-- Forgetting CORS allowlist (dashboard “works locally” then dies in prod).
+- Forgetting CORS allowlist (dashboard "works locally" then dies in prod).
 - Hosting JetStream on Cloud Run (state needs a home).
 
 ---
