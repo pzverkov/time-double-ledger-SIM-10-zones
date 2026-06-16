@@ -79,7 +79,7 @@ func (c *FraudConsumer) handleMsg(ctx context.Context, msg *nats.Msg) error {
 	if ev.AmountUnits >= 3600 { // 1 hour worth (in seconds)
 		_, err := c.db.Exec(ctx, `
       INSERT INTO incidents(zone_id, related_txn_id, severity, title, details)
-      VALUES($1, $2::uuid, 'WARN', 'Large time transfer', jsonb_build_object('amount_units',$3,'rule','large_transfer'))
+      VALUES($1, $2::uuid, 'WARN', 'Large time transfer', jsonb_build_object('amount_units',$3::bigint,'rule','large_transfer'))
     `, ev.ZoneID, ev.TransactionID, ev.AmountUnits)
 		if err != nil {
 			c.log.Warn("incident insert failed", "event_id", ev.EventID, "err", err.Error())
