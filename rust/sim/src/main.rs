@@ -246,8 +246,13 @@ async fn main() {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             time_ledger_sim_rust::config::REQUEST_TIMEOUT,
         ))
-        // Per-request server span; exported when OTel is enabled.
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        // Per-request server span at INFO so it is recorded under the default
+        // filter; this is the span whose context propagates to the consumers.
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http().make_span_with(
+                tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO),
+            ),
+        )
         .with_state(st);
 
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();

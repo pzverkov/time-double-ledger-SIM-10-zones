@@ -34,8 +34,10 @@ drives them.
 ```
 
 Observability: each backend emits structured JSON logs, Prometheus metrics
-(`/metrics`), and OpenTelemetry traces over OTLP to Jaeger. Compose also runs
-Prometheus and Grafana.
+(`/metrics`), and OpenTelemetry traces over OTLP to Jaeger. The transfer's W3C
+trace context is carried through the outbox and broker into the fraud/analytics
+consumers, so a transfer and the work it triggers form a single end-to-end trace.
+Compose also runs Prometheus and Grafana.
 
 ## Event pipeline (the core design)
 

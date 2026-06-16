@@ -87,6 +87,7 @@ mod tests {
         .unwrap();
         IncomingEvent {
             msg_id: Some(event_id.to_string()),
+            traceparent: None,
             payload: body,
         }
     }
@@ -138,6 +139,7 @@ mod tests {
         let body = serde_json::to_vec(&serde_json::json!({"amount_units": 5000})).unwrap();
         h.handle(&IncomingEvent {
             msg_id: None,
+            traceparent: None,
             payload: body,
         })
         .await

@@ -4,7 +4,9 @@ use futures::StreamExt;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use tracing::warn;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::broker::{
     BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, MAX_DELIVER,
@@ -42,9 +44,18 @@ impl NatsPublisher {
 
 #[async_trait]
 impl EventPublisher for NatsPublisher {
-    async fn publish(&self, subject: &str, msg_id: &str, body: Vec<u8>) -> Result<(), BrokerError> {
+    async fn publish(
+        &self,
+        subject: &str,
+        msg_id: &str,
+        traceparent: Option<&str>,
+        body: Vec<u8>,
+    ) -> Result<(), BrokerError> {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("Nats-Msg-Id", msg_id);
+        if let Some(tp) = traceparent {
+            headers.insert("traceparent", tp);
+        }
         self.js
             .publish_with_headers(subject.to_string(), headers, body.into())
             .await?
@@ -118,15 +129,24 @@ impl EventConsumer for NatsConsumer {
             match batch {
                 Ok(mut msgs) => {
                     while let Some(Ok(msg)) = msgs.next().await {
-                        let event = IncomingEvent {
-                            msg_id: msg
-                                .headers
+                        let header = |k| {
+                            msg.headers
                                 .as_ref()
-                                .and_then(|h| h.get("Nats-Msg-Id"))
-                                .map(|v| v.to_string()),
+                                .and_then(|h| h.get(k))
+                                .map(|v| v.to_string())
+                        };
+                        let event = IncomingEvent {
+                            msg_id: header("Nats-Msg-Id"),
+                            traceparent: header("traceparent"),
                             payload: msg.payload.to_vec(),
                         };
-                        match handler.handle(&event).await {
+                        // Link this handler span to the originating trace.
+                        let span = tracing::info_span!("consume", durable = %self.durable);
+                        // Best-effort: fails only when no OTel layer is active (tracing off).
+                        let _ = span.set_parent(crate::otel::context_from_traceparent(
+                            event.traceparent.as_deref(),
+                        ));
+                        match handler.handle(&event).instrument(span).await {
                             Ok(()) => {
                                 let _ = msg.ack().await;
                             }

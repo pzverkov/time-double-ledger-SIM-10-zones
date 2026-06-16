@@ -24,6 +24,7 @@ impl EventPublisher for Log {
         &self,
         _subject: &str,
         msg_id: &str,
+        _traceparent: Option<&str>,
         body: Vec<u8>,
     ) -> Result<(), BrokerError> {
         self.0.lock().unwrap().push((msg_id.to_string(), body));
@@ -52,6 +53,7 @@ impl EventConsumer for GroupConsumer {
                 Some((msg_id, payload)) => {
                     let ev = IncomingEvent {
                         msg_id: Some(msg_id),
+                        traceparent: None,
                         payload,
                     };
                     match handler.handle(&ev).await {
@@ -106,7 +108,7 @@ async fn wait_until(deadline_ms: u64, mut pred: impl FnMut() -> bool) {
 #[tokio::test]
 async fn one_event_fans_out_to_two_consumer_groups() {
     let log = Log::default();
-    log.publish("e1", "e1", b"{}".to_vec()).await.unwrap();
+    log.publish("e1", "e1", None, b"{}".to_vec()).await.unwrap();
 
     let fraud_calls = Arc::new(Mutex::new(0));
     let analytics_calls = Arc::new(Mutex::new(0));
@@ -141,7 +143,7 @@ async fn one_event_fans_out_to_two_consumer_groups() {
 #[tokio::test]
 async fn handler_error_triggers_redelivery() {
     let log = Log::default();
-    log.publish("e1", "e1", b"{}".to_vec()).await.unwrap();
+    log.publish("e1", "e1", None, b"{}".to_vec()).await.unwrap();
 
     let calls = Arc::new(Mutex::new(0));
     let cancel = CancellationToken::new();
