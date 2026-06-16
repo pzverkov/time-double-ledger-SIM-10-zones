@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use time_ledger_sim_rust::messaging::broker::{
     BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, MAX_DELIVER,
 };
+use time_ledger_sim_rust::messaging::store::DeadLetterStore;
 
 /// Append-only log shared by a publisher and N consumer groups.
 type LogEntries = Arc<Mutex<Vec<(String, Vec<u8>)>>>;
@@ -32,10 +33,36 @@ impl EventPublisher for Log {
     }
 }
 
+/// Records dead-letter calls so tests can assert poison handling.
+#[derive(Default)]
+struct FakeDlq {
+    calls: Mutex<Vec<(String, i64)>>, // (consumer, delivered)
+}
+
+#[async_trait]
+impl DeadLetterStore for FakeDlq {
+    async fn dead_letter(
+        &self,
+        consumer: &str,
+        _event_id: Option<&str>,
+        _payload: &[u8],
+        _error: &str,
+        delivered: i64,
+    ) -> Result<(), BrokerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push((consumer.to_string(), delivered));
+        Ok(())
+    }
+}
+
 /// One consumer group: its own cursor over the shared log, so each group sees
-/// every event (fan-out). Re-reads an offset on handler error, bounded by MAX_DELIVER.
+/// every event (fan-out). Re-reads an offset on handler error, bounded by
+/// MAX_DELIVER, then dead-letters the poison message (mirrors the real consumers).
 struct GroupConsumer {
     log: Log,
+    dlq: Arc<FakeDlq>,
 }
 
 #[async_trait]
@@ -61,10 +88,20 @@ impl EventConsumer for GroupConsumer {
                             idx += 1;
                             attempts = 0;
                         }
-                        Err(_) => {
+                        Err(e) => {
                             attempts += 1;
                             if attempts >= MAX_DELIVER {
-                                idx += 1; // poison: drop and move on
+                                let _ = self
+                                    .dlq
+                                    .dead_letter(
+                                        "grp",
+                                        ev.msg_id.as_deref(),
+                                        &ev.payload,
+                                        &e.to_string(),
+                                        attempts,
+                                    )
+                                    .await;
+                                idx += 1; // poison: dead-lettered, move on
                                 attempts = 0;
                             }
                         }
@@ -114,8 +151,14 @@ async fn one_event_fans_out_to_two_consumer_groups() {
     let analytics_calls = Arc::new(Mutex::new(0));
     let cancel = CancellationToken::new();
 
-    let c1 = GroupConsumer { log: log.clone() };
-    let c2 = GroupConsumer { log: log.clone() };
+    let c1 = GroupConsumer {
+        log: log.clone(),
+        dlq: Arc::new(FakeDlq::default()),
+    };
+    let c2 = GroupConsumer {
+        log: log.clone(),
+        dlq: Arc::new(FakeDlq::default()),
+    };
     let h1: Arc<dyn EventHandler> = Arc::new(CountingHandler {
         calls: fraud_calls.clone(),
         fail_first: 0,
@@ -147,7 +190,10 @@ async fn handler_error_triggers_redelivery() {
 
     let calls = Arc::new(Mutex::new(0));
     let cancel = CancellationToken::new();
-    let c = GroupConsumer { log: log.clone() };
+    let c = GroupConsumer {
+        log: log.clone(),
+        dlq: Arc::new(FakeDlq::default()),
+    };
     // fail once, then succeed: handler must be invoked at least twice.
     let h: Arc<dyn EventHandler> = Arc::new(CountingHandler {
         calls: calls.clone(),
@@ -164,5 +210,37 @@ async fn handler_error_triggers_redelivery() {
     assert!(
         *calls.lock().unwrap() >= 2,
         "expected redelivery after error"
+    );
+}
+
+#[tokio::test]
+async fn poison_message_is_dead_lettered_after_max_deliver() {
+    let log = Log::default();
+    log.publish("e1", "e1", None, b"{}".to_vec()).await.unwrap();
+
+    let dlq = Arc::new(FakeDlq::default());
+    let cancel = CancellationToken::new();
+    let c = GroupConsumer {
+        log: log.clone(),
+        dlq: dlq.clone(),
+    };
+    // Always fails -> exhausts MAX_DELIVER -> dead-lettered, then the cursor moves on.
+    let h: Arc<dyn EventHandler> = Arc::new(CountingHandler {
+        calls: Arc::new(Mutex::new(0)),
+        fail_first: usize::MAX,
+    });
+
+    let cc = cancel.clone();
+    let t = tokio::spawn(async move { c.run(h, cc).await });
+
+    wait_until(500, || !dlq.calls.lock().unwrap().is_empty()).await;
+    cancel.cancel();
+    let _ = t.await;
+
+    let calls = dlq.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "poison message dead-lettered exactly once");
+    assert_eq!(
+        calls[0].1, MAX_DELIVER,
+        "dead-lettered at MAX_DELIVER attempts"
     );
 }

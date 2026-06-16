@@ -25,7 +25,10 @@ type Consumer = Arc<dyn EventConsumer>;
 
 /// Build a publisher and the per-group consumers for the selected broker.
 /// Returns None when messaging is disabled or setup fails (the API still runs).
-async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)> {
+async fn build_messaging(
+    broker: &str,
+    dlq: std::sync::Arc<dyn time_ledger_sim_rust::messaging::store::DeadLetterStore>,
+) -> Option<(Publisher, Consumer, Consumer)> {
     match broker {
         "nats" => {
             let nats_url = match env::var("NATS_URL") {
@@ -61,11 +64,13 @@ async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)
                 js.clone(),
                 fraud::CONSUMER,
                 SUBJECT_TRANSFER_POSTED,
+                dlq.clone(),
             ));
             let analytics_c: Consumer = Arc::new(nats::NatsConsumer::new(
                 js,
                 analytics::CONSUMER,
                 SUBJECT_TRANSFER_POSTED,
+                dlq,
             ));
             Some((publisher, fraud_c, analytics_c))
         }
@@ -79,7 +84,7 @@ async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)
                     return None;
                 }
             };
-            match redpanda::build(&brokers).await {
+            match redpanda::build(&brokers, dlq).await {
                 Ok((publisher, fraud_c, analytics_c)) => {
                     info!("Redpanda connected, starting outbox publisher and consumers");
                     Some((publisher, fraud_c, analytics_c))
@@ -163,10 +168,13 @@ async fn main() {
         let cancel = cancel.clone();
         let backlog = metrics_state.outbox_backlog.clone();
         tokio::spawn(async move {
-            let Some((publisher, fraud_c, analytics_c)) = build_messaging(&broker).await else {
+            let store = Arc::new(PgStore::new(pool.clone()));
+            let dlq: Arc<dyn time_ledger_sim_rust::messaging::store::DeadLetterStore> =
+                store.clone();
+            let Some((publisher, fraud_c, analytics_c)) = build_messaging(&broker, dlq).await
+            else {
                 return;
             };
-            let store = Arc::new(PgStore::new(pool.clone()));
             let outbox = outbox::OutboxPublisher::new(store.clone(), publisher);
             let fraud_handler: Arc<dyn EventHandler> =
                 Arc::new(fraud::FraudHandler::new(store.clone()));
@@ -195,6 +203,40 @@ async fn main() {
                     }
                 }
             });
+        });
+    }
+
+    // Retention: prune old published-outbox, processed-inbox, and dead-letter rows
+    // so the tables do not grow unbounded. Independent of messaging (uses the pool
+    // directly). Cutoffs are computed here and bound as timestamps.
+    {
+        let pool = pool.clone();
+        let cancel = cancel.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(time_ledger_sim_rust::config::RETENTION_INTERVAL);
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => return,
+                    _ = interval.tick() => {
+                        let Ok(client) = pool.get().await else { continue };
+                        let now = time::OffsetDateTime::now_utc();
+                        let cutoff = now - time::Duration::seconds(time_ledger_sim_rust::config::RETENTION_SECS);
+                        let dlq_cutoff = now - time::Duration::seconds(time_ledger_sim_rust::config::DLQ_RETENTION_SECS);
+                        for (label, sql, ts) in [
+                            ("outbox", "DELETE FROM outbox_events WHERE published_at IS NOT NULL AND published_at < $1", cutoff),
+                            ("inbox", "DELETE FROM inbox_events WHERE processed_at < $1", cutoff),
+                            ("dead_letter", "DELETE FROM dead_letter_events WHERE dead_lettered_at < $1", dlq_cutoff),
+                        ] {
+                            match client.execute(sql, &[&ts]).await {
+                                Ok(n) if n > 0 => info!(table = label, pruned = n, "retention pruned rows"),
+                                Ok(_) => {}
+                                Err(e) => warn!(error = %e, table = label, "retention prune failed"),
+                            }
+                        }
+                    }
+                }
+            }
         });
     }
 

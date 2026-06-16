@@ -11,6 +11,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use super::broker::{
     BrokerError, EventConsumer, EventHandler, EventPublisher, IncomingEvent, MAX_DELIVER,
 };
+use super::store::DeadLetterStore;
 
 pub const STREAM_NAME: &str = "EVENTS";
 
@@ -69,6 +70,7 @@ pub struct NatsConsumer {
     js: jetstream::Context,
     durable: String,
     filter_subject: String,
+    dlq: Arc<dyn DeadLetterStore>,
 }
 
 impl NatsConsumer {
@@ -76,11 +78,13 @@ impl NatsConsumer {
         js: jetstream::Context,
         durable: impl Into<String>,
         filter_subject: impl Into<String>,
+        dlq: Arc<dyn DeadLetterStore>,
     ) -> Self {
         Self {
             js,
             durable: durable.into(),
             filter_subject: filter_subject.into(),
+            dlq,
         }
     }
 
@@ -151,20 +155,45 @@ impl EventConsumer for NatsConsumer {
                                 let _ = msg.ack().await;
                             }
                             Err(e) => {
-                                // Leave un-acked: JetStream redelivers up to MAX_DELIVER,
-                                // then drops. Never silent.
                                 let delivered = msg.info().map(|i| i.delivered).unwrap_or(0);
-                                warn!(
-                                    error = %e,
-                                    durable = %self.durable,
-                                    delivered,
-                                    "handler failed, leaving message for redelivery"
-                                );
-                                // Nak with a short delay so a persistently-failing
-                                // handler backs off instead of hot-looping to max_deliver.
-                                let _ = msg
-                                    .ack_with(jetstream::AckKind::Nak(Some(Duration::from_secs(1))))
-                                    .await;
+                                if delivered >= MAX_DELIVER {
+                                    // Last allowed delivery: dead-letter and ack to
+                                    // terminate (naking here would drop it unrecorded).
+                                    match self
+                                        .dlq
+                                        .dead_letter(
+                                            &self.durable,
+                                            event.msg_id.as_deref(),
+                                            &event.payload,
+                                            &e.to_string(),
+                                            delivered,
+                                        )
+                                        .await
+                                    {
+                                        Ok(()) => {
+                                            warn!(error = %e, durable = %self.durable, delivered, "poison message dead-lettered");
+                                            let _ = msg.ack().await;
+                                        }
+                                        Err(dlq_err) => {
+                                            // Do not ack: redeliver rather than lose it.
+                                            warn!(error = %dlq_err, durable = %self.durable, "dead-letter write failed, leaving message for redelivery");
+                                            let _ = msg
+                                                .ack_with(jetstream::AckKind::Nak(Some(
+                                                    Duration::from_secs(1),
+                                                )))
+                                                .await;
+                                        }
+                                    }
+                                } else {
+                                    // Nak with a short delay so a persistently-failing
+                                    // handler backs off instead of hot-looping.
+                                    warn!(error = %e, durable = %self.durable, delivered, "handler failed, leaving message for redelivery");
+                                    let _ = msg
+                                        .ack_with(jetstream::AckKind::Nak(Some(
+                                            Duration::from_secs(1),
+                                        )))
+                                        .await;
+                                }
                             }
                         }
                     }
