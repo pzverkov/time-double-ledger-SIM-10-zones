@@ -17,6 +17,7 @@ use time_ledger_sim_rust::messaging::broker::{
 use time_ledger_sim_rust::messaging::store::PgStore;
 use time_ledger_sim_rust::messaging::{analytics, fraud, nats, outbox};
 use time_ledger_sim_rust::middleware::cors;
+use time_ledger_sim_rust::otel;
 use time_ledger_sim_rust::state::{AppState, init_metrics};
 
 type Publisher = Arc<dyn EventPublisher>;
@@ -96,18 +97,38 @@ async fn build_messaging(broker: &str) -> Option<(Publisher, Consumer, Consumer)
     }
 }
 
-fn init_tracing() {
+fn init_tracing(provider: Option<&opentelemetry_sdk::trace::SdkTracerProvider>) {
+    use opentelemetry::trace::TracerProvider as _;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .json()
+    // None when OTel is disabled; tracing-subscriber treats an Option<Layer> as a
+    // no-op layer, so logging-only works unchanged.
+    let otel_layer =
+        provider.map(|p| tracing_opentelemetry::layer().with_tracer(p.tracer("time-ledger-sim")));
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().json())
+        .with(otel_layer)
         .init();
 }
 
 #[tokio::main]
 async fn main() {
-    init_tracing();
+    // Build the OTel provider before tracing init so its layer can be attached.
+    let otel_provider = match env::var("OTEL_EXPORTER_OTLP_ENDPOINT") {
+        Ok(endpoint) if !endpoint.is_empty() => match otel::build_provider(&endpoint) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("otel init failed, continuing without tracing: {e}");
+                None
+            }
+        },
+        _ => None,
+    };
+    init_tracing(otel_provider.as_ref());
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL required");
     let port = env::var("PORT").unwrap_or_else(|_| "8081".into());
@@ -225,6 +246,8 @@ async fn main() {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             time_ledger_sim_rust::config::REQUEST_TIMEOUT,
         ))
+        // Per-request server span; exported when OTel is enabled.
+        .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(st);
 
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
@@ -238,4 +261,9 @@ async fn main() {
         })
         .await
         .unwrap();
+
+    // Flush buffered spans before the runtime tears down.
+    if let Some(p) = otel_provider {
+        let _ = p.shutdown();
+    }
 }
