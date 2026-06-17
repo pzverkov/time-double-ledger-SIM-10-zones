@@ -14,6 +14,12 @@ COPY Cargo.toml ./
 RUN mkdir -p src benches && echo 'fn main(){}' > src/main.rs && echo 'fn main(){}' > benches/messaging.rs
 RUN if [ "$REDPANDA" = "1" ]; then cargo build --release --features redpanda; else cargo build --release; fi
 COPY . .
+# Build metadata read by option_env! at compile time; set after the dep-cache
+# build so a changing SHA does not bust the dependency layer. The version itself
+# stays in Cargo.toml.
+ARG GIT_SHA=
+ARG BUILD_TIME=
+ENV GIT_SHA=${GIT_SHA} BUILD_TIME=${BUILD_TIME}
 RUN if [ "$REDPANDA" = "1" ]; then cargo build --release --features redpanda; else cargo build --release; fi
 
 FROM gcr.io/distroless/cc:nonroot
