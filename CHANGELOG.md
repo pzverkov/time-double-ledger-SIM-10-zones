@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-18
+
+### Added
+- Go backend: dependency-aware `/readyz` readiness probe (bounded DB ping, 503 when unhealthy), matching the Rust backend
+- `/v1/version` reports the git commit and build date on both backends, injected at build time (Go via ldflags, Rust via `option_env!`); `just infra-up`/`build-go`/`build-rust` and the compose build args supply them
+
 ## [0.4.0] - 2026-06-17
 
 ### Added
