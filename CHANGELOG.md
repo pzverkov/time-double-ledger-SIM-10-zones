@@ -7,14 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-17
+
 ### Added
-- Rust backend: swappable messaging broker behind `EventPublisher`/`EventConsumer`/`EventHandler` traits with `OutboxStore`/`FraudStore`/`AnalyticsStore` DB ports; `EVENT_BROKER` selects NATS JetStream (default) or Redpanda
-- Rust backend: Redpanda (Kafka API) implementation behind the `redpanda` cargo feature
-- Rust backend: analytics consumer group (`zone_event_stats`) demonstrating fan-out alongside the fraud consumer
-- Rust backend: explicit at-least-once redelivery (ack on success, redeliver on error bounded by `max_deliver`, logged poison drop)
+- Swappable messaging broker behind `EventPublisher`/`EventConsumer`/`EventHandler` traits with `OutboxStore`/`FraudStore`/`AnalyticsStore` DB ports; `EVENT_BROKER` selects NATS JetStream (default) or Redpanda (Kafka API, `redpanda` cargo feature). See ADR 0001
+- Analytics consumer group (`zone_event_stats`) demonstrating fan-out alongside the fraud consumer
+- Dead-letter queue for poison events and an outbox/inbox/DLQ retention job
+- Event schema versioning: `schema_version` stamped on every event; consumers reject unsupported versions (see `docs/event-schema.md`)
+- Continuous ledger reconciliation job that flags balance-vs-postings drift and unbalanced transactions via Prometheus gauges
+- Per-client rate limiting on `POST /v1/transfers` (`RATE_LIMIT_RPS`, `TRUST_PROXY_HEADERS`), returning 429
+- OpenTelemetry tracing with W3C trace context propagated from the transfer through the outbox and broker into the consumers
+- Readiness probe `/readyz` (dependency-aware), request and statement timeouts, and load shedding
 - `outbox_backlog` Prometheus gauge as the pipeline backlog SLI
-- Failure-path unit tests (dedup, error redelivery, partial publish failure, fan-out) and `cargo bench` micro-benchmarks
-- e2e and load tooling: `scripts/e2e/transfers_e2e.sh`, `scripts/load/transfers.k6.js`, `scripts/load/pipeline_lag.sh`; ADR 0001 and `docs/benchmarks.md`
+- Failure-path unit tests and `cargo bench` micro-benchmarks; e2e and load tooling (`scripts/e2e`, `scripts/load`); contributing, security, architecture, parity, event-schema, and backup/DR docs
+
+### Changed
+- Outbox publisher is multi-replica safe (`FOR UPDATE SKIP LOCKED`); broker connect retries in the background so a startup race cannot permanently disable messaging
+- DB connection pool is bounded and recycling in both backends (verified recycling / lifetime + health-check bounds)
+- Admin-guard failures return 401, and the admin key is compared in constant time
+- Web `App.tsx` split into shared types and presentational components
+- Flyway-convention migration names; handlers unified on `AppError`; internal error detail no longer leaked to clients
+- CI: golangci-lint gate, gofmt-simplify, contract-test image-build caching, Schemathesis pinned and scoped to conformance phases
+
+### Security
+- BREAKING: operator mutations (zone status/controls, spool replay, incident actions) now require `X-Admin-Key`; the request-body `actor` field is removed and the audit actor is derived from the `X-Actor` header, so an unauthenticated request can no longer write a forged audit record
+- Production startup guard refuses a weak or unset `ADMIN_KEY` when `APP_ENV=production`
+- Broker authentication via `NATS_CREDS` (JWT/nkey file) or an authenticated/`tls://` `NATS_URL`
+
+### Fixed
+- SQL parameter type-inference bugs (uuid binds, `jsonb_build_object` casts) across the handler write paths and the Go fraud consumer
+- Omitted transfer `metadata` defaults to an empty object instead of null
+- Contract-test flakes: e2e timing, Schemathesis transport retries, and transient registry pull timeouts
 
 ## [0.3.1] - 2026-04-28
 
