@@ -262,11 +262,20 @@ async fn main() {
     };
 
     // Per-client rate limit on the public write path (0 disables; see config).
+    // Honor X-Forwarded-For only behind a trusted proxy, else a direct caller
+    // could spoof the key and bypass the limit.
     let rate_limit_rps = env::var("RATE_LIMIT_RPS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(time_ledger_sim_rust::config::DEFAULT_RATE_LIMIT_RPS);
-    let limiter = Arc::new(ratelimit::RateLimiter::new(rate_limit_rps, rate_limit_rps));
+    let trust_proxy = env::var("TRUST_PROXY_HEADERS")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    let limiter = Arc::new(ratelimit::RateLimiter::new(
+        rate_limit_rps,
+        rate_limit_rps,
+        trust_proxy,
+    ));
 
     let app = Router::new()
         .route("/healthz", get(admin::healthz))

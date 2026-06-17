@@ -21,8 +21,8 @@ type API struct {
 	rl       *rateLimiter
 }
 
-func NewAPI(adminKey string, rateLimitRPS int, led *ledger.Ledger, log *slog.Logger) *API {
-	return &API{adminKey: adminKey, led: led, log: log, rl: newRateLimiter(rateLimitRPS)}
+func NewAPI(adminKey string, rateLimitRPS int, trustProxy bool, led *ledger.Ledger, log *slog.Logger) *API {
+	return &API{adminKey: adminKey, led: led, log: log, rl: newRateLimiter(rateLimitRPS, trustProxy)}
 }
 
 func (a *API) RegisterRoutes(r chi.Router) {
