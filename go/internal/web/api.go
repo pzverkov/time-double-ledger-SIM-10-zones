@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -61,7 +62,9 @@ func (a *API) RegisterRoutes(r chi.Router) {
 
 func (a *API) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if a.adminKey == "" || r.Header.Get("X-Admin-Key") != a.adminKey {
+		// Constant-time compare so the key cannot be recovered by timing.
+		got := r.Header.Get("X-Admin-Key")
+		if a.adminKey == "" || subtle.ConstantTimeCompare([]byte(got), []byte(a.adminKey)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
