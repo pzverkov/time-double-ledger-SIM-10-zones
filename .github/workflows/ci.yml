@@ -166,10 +166,13 @@ jobs:
       # tolerates the occasional transient "connection aborted" (HTTP keep-alive
       # reuse race against the shared backends under CI load), which is a transport
       # flake, not a schema violation; a real violation still fails every retry.
+      # -H supplies the admin key so the operator endpoints (now auth-guarded)
+      # are exercised through the authenticated path; it is ignored by the open
+      # endpoints. The key matches ADMIN_KEY in ci/docker-compose.test.yml.
       - name: Test Go backend
-        run: st run --checks response_schema_conformance --phases coverage,fuzzing --request-retries 3 --url http://localhost:8080 --exclude-path-regex '/v1/sim/' api/openapi.yaml
+        run: st run --checks response_schema_conformance --phases coverage,fuzzing --request-retries 3 -H "X-Admin-Key: test-admin-key" --url http://localhost:8080 --exclude-path-regex '/v1/sim/' api/openapi.yaml
       - name: Test Rust backend
-        run: st run --checks response_schema_conformance --phases coverage,fuzzing --request-retries 3 --url http://localhost:8081 --exclude-path-regex '/v1/sim/' api/openapi.yaml
+        run: st run --checks response_schema_conformance --phases coverage,fuzzing --request-retries 3 -H "X-Admin-Key: test-admin-key" --url http://localhost:8081 --exclude-path-regex '/v1/sim/' api/openapi.yaml
       - name: Teardown
         if: always()
         run: docker compose -f ci/docker-compose.test.yml down

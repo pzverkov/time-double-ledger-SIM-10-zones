@@ -98,7 +98,9 @@ export default function App() {
 
   const [actor, setActor] = useState("operator-1");
   const [reason, setReason] = useState("sim action");
-  const [adminKey, setAdminKey] = useState("");
+  // Defaults to the local dev key (infra/docker-compose.yml) so the demo's
+  // operator actions work one-click; override for any other backend.
+  const [adminKey, setAdminKey] = useState("dev-admin-key");
 
   const [transferFrom, setTransferFrom] = useState("acct-A");
   const [transferTo, setTransferTo] = useState("acct-B");
@@ -117,6 +119,12 @@ export default function App() {
 
   function toast(title: string, message?: string) {
     setToasts((t) => [{ id: uuidv4(), title, message }, ...t].slice(0, 6));
+  }
+
+  // Auth + actor headers for operator mutations. The server records the audit
+  // actor from X-Actor (trusted only because X-Admin-Key validated), not the body.
+  function opsHeaders(): Record<string, string> {
+    return { "X-Admin-Key": adminKey, "X-Actor": actor };
   }
 
   async function refreshAll() {
@@ -247,7 +255,7 @@ export default function App() {
     if (!selectedZone) return;
     setBusy(true);
     try {
-      await api(`/v1/zones/${selectedZone.id}/status`, { method: "POST", body: { status, actor, reason } });
+      await api(`/v1/zones/${selectedZone.id}/status`, { method: "POST", headers: opsHeaders(), body: { status, reason } });
       toast("Zone status updated", `${selectedZone.name} -> ${status}`);
       await refreshAll();
     } catch (e: any) {
@@ -266,13 +274,12 @@ export default function App() {
       writes_blocked: next.writes_blocked ?? current.writes_blocked,
       cross_zone_throttle: next.cross_zone_throttle ?? current.cross_zone_throttle,
       spool_enabled: next.spool_enabled ?? current.spool_enabled,
-      actor,
       reason,
     };
 
     setBusy(true);
     try {
-      await api(`/v1/zones/${selectedZone.id}/controls`, { method: "POST", body: payload });
+      await api(`/v1/zones/${selectedZone.id}/controls`, { method: "POST", headers: opsHeaders(), body: payload });
       toast("Controls updated", `${selectedZone.id}`);
       await loadZoneDrilldown(selectedZone.id);
     } catch (e: any) {
@@ -299,7 +306,8 @@ export default function App() {
     try {
       const res = await api<any>(`/v1/zones/${selectedZone.id}/spool/replay`, {
         method: "POST",
-        body: { limit: replayLimit, actor, reason },
+        headers: opsHeaders(),
+        body: { limit: replayLimit, reason },
       });
       toast("Spool replayed", `Applied ${res.applied}, failed ${res.failed}`);
       await loadZoneDrilldown(selectedZone.id);
@@ -362,11 +370,11 @@ export default function App() {
     try {
       await api(`/v1/incidents/${incidentManage.id}/action`, {
         method: "POST",
+        headers: opsHeaders(),
         body: {
           action,
           assignee: incidentAssignee,
           note: incidentNote,
-          actor,
           reason,
         },
       });

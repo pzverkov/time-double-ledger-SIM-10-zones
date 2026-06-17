@@ -86,10 +86,12 @@ curl -s -X POST http://localhost:8080/v1/transfers \
   -H 'content-type: application/json' \
   -d '{"request_id":"req-0001","from_account":"acct-a","to_account":"acct-b","amount_units":120,"zone_id":"zone-eu","metadata":{"note":"demo"}}' | jq .
 
-# Mark a zone DOWN (creates audit log + incident)
+# Mark a zone DOWN (creates audit log + incident).
+# Operator mutations require X-Admin-Key; the audit actor comes from X-Actor.
 curl -s -X POST http://localhost:8080/v1/zones/zone-eu/status \
   -H 'content-type: application/json' \
-  -d '{"status":"DOWN","actor":"operator@example","reason":"simulated outage"}' | jq .
+  -H 'X-Admin-Key: dev-admin-key' -H 'X-Actor: operator@example' \
+  -d '{"status":"DOWN","reason":"simulated outage"}' | jq .
 
 # Get zone controls
 curl -s http://localhost:8080/v1/zones/zone-eu/controls | jq .

@@ -29,7 +29,10 @@
 - **Message size limits** (recommended): enforce in API and NATS
 - **Validation**: amount_units > 0, known zone, zone DOWN blocks transfers
 - **Least privilege** (recommended): separate DB users for app vs migrator
-- **Admin-only snapshot/restore**: guarded by `X-Admin-Key` (dev-only)
+- **Admin-guarded operator actions**: zone status/controls, spool replay, incident
+  actions, and snapshot/restore require `X-Admin-Key`; the audit actor is derived
+  from the authenticated `X-Actor` header, not a client-supplied body field, so the
+  audit trail cannot be forged on an unauthenticated request
 - **Structured logs** with redaction hooks (do not log full metadata by default)
 - **Observability**: metrics + traces for anomaly detection
 
