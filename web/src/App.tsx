@@ -6,54 +6,13 @@ import { api, getApiBase, setApiBase } from "./lib/api";
 import { fmtRfc3339, fmtUnits } from "./lib/time";
 import { blastRadius, recommendedControlsFor } from "./lib/risk";
 import { ZONES, zoneNumber } from "./zones";
-
-type Zone = { id: string; name: string; status: "OK" | "DEGRADED" | "DOWN"; updated_at: string };
-
-type ZoneControls = {
-  zone_id: string;
-  writes_blocked: boolean;
-  cross_zone_throttle: number;
-  spool_enabled: boolean;
-  updated_at: string;
-};
-
-type SpoolStats = { zone_id: string; pending: number; applied: number; failed: number };
-
-type AuditEntry = {
-  id: string;
-  actor: string;
-  action: string;
-  target_type: string;
-  target_id: string;
-  reason?: string | null;
-  details: any;
-  created_at: string;
-};
-
-type Incident = {
-  id: string;
-  zone_id: string;
-  related_txn_id?: string | null;
-  severity: "INFO" | "WARN" | "CRITICAL";
-  status: "OPEN" | "ACK" | "RESOLVED" | string;
-  title: string;
-  details: any;
-  detected_at: string;
-};
-
-type Balance = { account_id: string; balance_units: number; updated_at: string };
-
-type Txn = {
-  id: string;
-  request_id: string;
-  from_account: string;
-  to_account: string;
-  amount_units: number;
-  zone_id: string;
-  created_at: string;
-};
-
-type TxnDetail = Txn & { metadata: any; postings: { account_id: string; direction: string; amount_units: number }[] };
+import { Zone, ZoneControls, SpoolStats, AuditEntry, Incident, Balance, Txn, TxnDetail } from "./types";
+import { ConnBanner } from "./components/ConnBanner";
+import { BalancesTable } from "./components/BalancesTable";
+import { TransactionsTable } from "./components/TransactionsTable";
+import { IncidentsTable } from "./components/IncidentsTable";
+import { AuditTable } from "./components/AuditTable";
+import { TransferForm } from "./components/TransferForm";
 
 function clsStatus(s: string) {
   const t = (s || "").toLowerCase();
@@ -495,16 +454,7 @@ export default function App() {
         </div>
       </div>
 
-      {connStatus === "offline" && (
-        <div className="conn-banner offline">
-          Backend unreachable. Last data: {lastUpdated ? lastUpdated.toLocaleTimeString() : "never"}. Retrying automatically...
-        </div>
-      )}
-      {connStatus === "loading" && (
-        <div className="conn-banner loading">
-          Connecting to backend...
-        </div>
-      )}
+      <ConnBanner connStatus={connStatus} lastUpdated={lastUpdated} />
 
       <div className="container">
         <div className="grid">
@@ -678,136 +628,33 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="card inner" style={{ marginTop: 12 }}>
-                <div className="card-h">
-                  <h2>Incidents in {selectedZone?.name || ""}</h2>
-                  <div className="kv"><span className="small">{incidents.length} rows</span></div>
-                </div>
-                <div className="card-b">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Time</th>
-                        <th>Sev</th>
-                        <th>Status</th>
-                        <th>Title</th>
-                        <th className="mono">Txn</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {incidents.map((i) => (
-                        <tr key={i.id}>
-                          <td className="small">{fmtRfc3339(i.detected_at)}</td>
-                          <td>
-                            <span className={`badge ${i.severity === "CRITICAL" ? "down" : i.severity === "WARN" ? "degraded" : "ok"}`}>
-                              <span className="dot" />{i.severity}
-                            </span>
-                          </td>
-                          <td className="small mono">{i.status}</td>
-                          <td>{i.title}</td>
-                          <td className="mono small">{i.related_txn_id ? i.related_txn_id.slice(0, 8) : ""}</td>
-                          <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                            <button className="btn" onClick={() => viewIncident(i.id)}>View</button>
-                            <button className="btn" onClick={() => { setIncidentManage(i); setIncidentAssignee(String(i.details?.assignee || "")); setIncidentNote(""); }}>Manage</button>
-                          </td>
-                        </tr>
-                      ))}
-                      {incidents.length === 0 ? (
-                        <tr><td colSpan={6} className="small">No incidents in this zone.</td></tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <IncidentsTable
+                incidents={incidents}
+                zoneName={selectedZone?.name || ""}
+                onView={viewIncident}
+                onManage={(i) => { setIncidentManage(i); setIncidentAssignee(String(i.details?.assignee || "")); setIncidentNote(""); }}
+              />
 
-              <div className="card inner" style={{ marginTop: 12 }}>
-                <div className="card-h">
-                  <h2>Transfer generator</h2>
-                  <div className="kv"><span className="small">Unit is seconds</span></div>
-                </div>
-                <div className="card-b">
-                  <div className="formRow">
-                    <input className="input" value={transferFrom} onChange={(e) => setTransferFrom(e.target.value)} placeholder="from_account" />
-                    <input className="input" value={transferTo} onChange={(e) => setTransferTo(e.target.value)} placeholder="to_account" />
-                    <input className="input" type="number" value={transferAmount} onChange={(e) => setTransferAmount(Number(e.target.value))} placeholder="amount (seconds)" />
-                    <button
-                      className="btn primary"
-                      disabled={busy || !transferFrom || !transferTo || transferAmount <= 0}
-                      onClick={() => createTransfer(transferFrom, transferTo, transferAmount, selectedZoneId, { mode: "manual" })}
-                    >
-                      Send
-                    </button>
-                  </div>
-                  <div className="small">For higher resolution later, switch to ms without changing ledger semantics.</div>
-                </div>
-              </div>
+              <TransferForm
+                from={transferFrom}
+                to={transferTo}
+                amount={transferAmount}
+                busy={busy}
+                onFromChange={setTransferFrom}
+                onToChange={setTransferTo}
+                onAmountChange={setTransferAmount}
+                onSend={() => createTransfer(transferFrom, transferTo, transferAmount, selectedZoneId, { mode: "manual" })}
+              />
 
-              <div className="card inner" style={{ marginTop: 12 }}>
-                <div className="card-h"><h2>Audit trail (zone)</h2><div className="kv"><span className="small">{audit.length} rows</span></div></div>
-                <div className="card-b">
-                  <table className="table">
-                    <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Reason</th></tr></thead>
-                    <tbody>
-                      {audit.map(a => (
-                        <tr key={a.id}>
-                          <td className="small">{fmtRfc3339(a.created_at)}</td>
-                          <td className="small mono">{a.actor}</td>
-                          <td className="small">{a.action}</td>
-                          <td className="small">{a.reason || ""}</td>
-                        </tr>
-                      ))}
-                      {audit.length === 0 ? <tr><td colSpan={4} className="small">No audit entries yet.</td></tr> : null}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <AuditTable audit={audit} />
 
             </div>
           </div>
         </div>
 
         <div className="grid">
-          <div className="card">
-            <div className="card-h"><h2>Balances</h2><div className="kv"><span className="small">{balances.length} accounts</span></div></div>
-            <div className="card-b">
-              <table className="table">
-                <thead><tr><th className="mono">Account</th><th>Balance</th><th>Updated</th></tr></thead>
-                <tbody>
-                  {balances.map(b => (
-                    <tr key={b.account_id}>
-                      <td className="mono">{b.account_id}</td>
-                      <td>{fmtUnits(b.balance_units)}</td>
-                      <td className="small">{fmtRfc3339(b.updated_at)}</td>
-                    </tr>
-                  ))}
-                  {balances.length === 0 ? <tr><td colSpan={3} className="small">No balances yet. Create a transfer.</td></tr> : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-h"><h2>Recent transactions</h2><div className="kv"><span className="small">{txns.length} rows</span></div></div>
-            <div className="card-b">
-              <table className="table">
-                <thead><tr><th>Time</th><th className="mono">Txn</th><th>From {"->"} To</th><th>Amount</th><th>Zone</th><th></th></tr></thead>
-                <tbody>
-                  {txns.map(t => (
-                    <tr key={t.id}>
-                      <td className="small">{fmtRfc3339(t.created_at)}</td>
-                      <td className="mono">{t.id.slice(0, 8)}</td>
-                      <td className="small mono">{t.from_account} {"->"} {t.to_account}</td>
-                      <td>{fmtUnits(t.amount_units)}</td>
-                      <td className="small mono">{t.zone_id}</td>
-                      <td style={{ textAlign: "right" }}><button className="btn" onClick={() => viewTxn(t.id)}>View</button></td>
-                    </tr>
-                  ))}
-                  {txns.length === 0 ? <tr><td colSpan={6} className="small">No transactions yet.</td></tr> : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <BalancesTable balances={balances} />
+          <TransactionsTable txns={txns} onView={viewTxn} />
         </div>
 
         <div className="small" style={{ marginTop: 14 }}>
