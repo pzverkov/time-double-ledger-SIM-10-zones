@@ -8,7 +8,7 @@ import (
 // These can be set at build time using -ldflags, e.g.
 // -X 'time-ledger-sim/go/internal/web.buildVersion=v1.2.3' -X '...buildCommit=abc' -X '...buildDate=2026-01-19'
 var (
-	buildVersion = "dev"
+	buildVersion = "0.4.0"
 	buildCommit  = "unknown"
 	buildDate    = "unknown"
 )
