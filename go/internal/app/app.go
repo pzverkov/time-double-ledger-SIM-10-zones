@@ -41,7 +41,19 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	if cfg.DatabaseURL == "" {
 		return nil, errors.New("DATABASE_URL required")
 	}
-	db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	// Bound and recycle the pool so it survives a DB restart/failover: cap size,
+	// retire connections by age, drop idle ones, and health-check periodically so
+	// stale connections are pruned before a request gets one.
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+	poolCfg.MaxConns = 16
+	poolCfg.MinConns = 2
+	poolCfg.MaxConnLifetime = 30 * time.Minute
+	poolCfg.MaxConnIdleTime = 5 * time.Minute
+	poolCfg.HealthCheckPeriod = 1 * time.Minute
+	db, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return nil, err
 	}

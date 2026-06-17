@@ -165,7 +165,15 @@ async fn main() {
         time_ledger_sim_rust::config::DB_STATEMENT_TIMEOUT_MS,
         time_ledger_sim_rust::config::DB_IDLE_TX_TIMEOUT_MS,
     ));
-    let mgr = deadpool_postgres::Manager::new(pg_config, NoTls);
+    // Verified recycling re-checks a connection before handing it out, so one
+    // broken by a DB restart/failover is replaced rather than served to a request.
+    let mgr = deadpool_postgres::Manager::from_config(
+        pg_config,
+        NoTls,
+        deadpool_postgres::ManagerConfig {
+            recycling_method: deadpool_postgres::RecyclingMethod::Verified,
+        },
+    );
     let pool = deadpool_postgres::Pool::builder(mgr)
         .max_size(16)
         .build()
