@@ -33,6 +33,10 @@ pub const RETENTION_SECS: i64 = 7 * 24 * 3600;
 /// Dead-letter rows are kept longer for investigation.
 pub const DLQ_RETENTION_SECS: i64 = 30 * 24 * 3600;
 
+/// Default per-client request rate (tokens/sec) on the public write path when
+/// `RATE_LIMIT_RPS` is unset. `0` disables limiting.
+pub const DEFAULT_RATE_LIMIT_RPS: u32 = 50;
+
 /// Known weak/example admin keys that must never guard a production deployment.
 pub const WEAK_ADMIN_KEYS: &[&str] = &[
     "dev-admin-key",

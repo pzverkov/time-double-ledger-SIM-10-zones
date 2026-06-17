@@ -23,7 +23,9 @@ This is a demo, not a hardened production deployment. Known posture:
 - **Message bus** (NATS, Redpanda) runs PLAINTEXT with no auth in the dev stack.
   Auth and TLS are configurable: NATS user/password and `tls://` are carried by
   `NATS_URL`, and `NATS_CREDS` points at a JWT/nkey credentials file.
-- **No rate limiting** on the public API endpoints in the dev configuration.
+- **Rate limiting**: the public write path (`POST /v1/transfers`) has a per-client
+  token-bucket limiter (`RATE_LIMIT_RPS`, default 50, `0` disables) returning 429.
+  This is a backstop; a real edge deployment should also rate-limit at the gateway.
 - Operator endpoints (zone controls, snapshot/restore) require the `ADMIN_KEY`
   header.
 - Internal error details are logged server-side and never returned to API clients.

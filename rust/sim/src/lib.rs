@@ -4,6 +4,7 @@ pub mod handlers;
 pub mod messaging;
 pub mod middleware;
 pub mod otel;
+pub mod ratelimit;
 pub mod state;
 pub mod util;
 
