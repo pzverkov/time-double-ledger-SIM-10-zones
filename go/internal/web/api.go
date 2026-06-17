@@ -18,10 +18,11 @@ type API struct {
 	adminKey string
 	led      *ledger.Ledger
 	log      *slog.Logger
+	rl       *rateLimiter
 }
 
-func NewAPI(adminKey string, led *ledger.Ledger, log *slog.Logger) *API {
-	return &API{adminKey: adminKey, led: led, log: log}
+func NewAPI(adminKey string, rateLimitRPS int, led *ledger.Ledger, log *slog.Logger) *API {
+	return &API{adminKey: adminKey, led: led, log: log, rl: newRateLimiter(rateLimitRPS)}
 }
 
 func (a *API) RegisterRoutes(r chi.Router) {
@@ -29,7 +30,8 @@ func (a *API) RegisterRoutes(r chi.Router) {
 
 	r.Get("/v1/zones", a.handleListZones)
 
-	r.Post("/v1/transfers", a.handleCreateTransfer)
+	// Rate-limit the public write path (per-client token bucket).
+	r.With(a.rl.middleware).Post("/v1/transfers", a.handleCreateTransfer)
 
 	r.Get("/v1/balances", a.handleListBalances)
 	r.Get("/v1/transactions", a.handleListTransactions)

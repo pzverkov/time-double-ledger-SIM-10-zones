@@ -49,7 +49,7 @@ Guidance:
 
 ## Recommended next hardening steps
 - AuthN/AuthZ (JWT / mTLS), role-based operator permissions
-- Rate limiting + request body size caps
+- Request body size caps (per-client rate limiting on the write path is implemented; see `RATE_LIMIT_RPS`)
 - Network policies: DB not publicly reachable; NATS protected
 - WAF and input sanitization hardening
 - Secrets manager (not env files), rotation
