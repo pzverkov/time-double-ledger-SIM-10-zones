@@ -6,12 +6,15 @@ A production-flavored simulation backend for a "time-currency" double-entry ledg
 - Zone controls: writes blocking, cross-zone throttle (0-100%), spool-and-replay
 - Fraud/ops incidents per zone with ACK/ASSIGN/RESOLVE lifecycle
 - Deterministic throttling via FNV-1a hashing (cross-language parity between Go and Rust)
-- **At-least-once** messaging with **Transactional Outbox** + **Inbox dedup**, behind a swappable broker seam (NATS JetStream default, Redpanda/Kafka-API via `--features redpanda`); two consumer groups (fraud + analytics). See [ADR 0001](docs/adr/0001-messaging-broker.md)
+- **At-least-once** messaging with **Transactional Outbox** + **Inbox dedup**, behind a swappable broker seam (NATS JetStream default, Redpanda/Kafka-API via `--features redpanda`); two consumer groups (fraud + analytics); versioned event schema and a dead-letter queue for poison events. See [ADR 0001](docs/adr/0001-messaging-broker.md)
 - Observability: structured logs, Prometheus metrics, OpenTelemetry traces (Jaeger) with trace context propagated across the broker
+- Security: admin-key-guarded operator actions with the audit actor derived from the authenticated request, per-client rate limiting on the public write path, configurable broker auth (NATS credentials), and a production startup guard that refuses weak/unset credentials
+- Reliability: continuous ledger reconciliation (balance-vs-postings drift gauges), outbox/inbox/DLQ retention, a bounded recycling DB pool, request/statement timeouts, and a dependency-aware `/readyz` probe
 
-Two interchangeable backends with full feature parity:
+Two backends sharing one HTTP API (validated in CI by Schemathesis). The Rust
+backend is ahead in messaging and periodic ops jobs; see the [parity matrix](docs/parity-matrix.md).
 - `go/` (Go 1.26+) - primary implementation
-- `rust/sim/` (Rust edition 2024) - feature-parity implementation with modular architecture
+- `rust/sim/` (Rust edition 2024) - modular implementation, ahead on messaging/ops
 
 ## Dashboard (web/)
 
@@ -61,6 +64,31 @@ cd infra && docker compose --profile redpanda up -d --build   # app on :8082
 This builds the image with `--features redpanda` and sets `EVENT_BROKER=redpanda`.
 Rationale and the NATS-vs-Redpanda comparison: [ADR 0001](docs/adr/0001-messaging-broker.md)
 and [docs/benchmarks.md](docs/benchmarks.md).
+
+## Configuration
+
+Both backends are configured by environment variables. Defaults are tuned for the
+local stack; see `infra/.env.example`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | (required) | Postgres connection string |
+| `PORT` | `8080` (Go) / `8081` (Rust) | HTTP listen port |
+| `EVENT_BROKER` | `nats` | `nats` or `redpanda` (Rust) |
+| `NATS_URL` | (unset = messaging off) | NATS connection; carries user/pass and `tls://` |
+| `NATS_CREDS` | (unset) | Path to a NATS JWT/nkey credentials file |
+| `REDPANDA_BROKERS` | (unset) | Kafka-API broker list when `EVENT_BROKER=redpanda` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset = tracing off) | OTLP collector endpoint |
+| `ADMIN_KEY` | (unset = admin disabled) | Guards operator/admin endpoints (`X-Admin-Key`) |
+| `APP_ENV` | (unset) | `production` rejects a weak/unset `ADMIN_KEY` at startup |
+| `RATE_LIMIT_RPS` | `50` | Per-client rate on `POST /v1/transfers`; `0` disables |
+| `TRUST_PROXY_HEADERS` | `false` | Honor `X-Forwarded-For`/`X-Real-IP` for the rate-limit key (set only behind a trusted proxy) |
+| `CORS_ALLOW_ORIGINS` | localhost dev origins | Comma-separated allowed origins |
+
+Operator mutations (zone status/controls, spool replay, incident actions) and
+snapshot/restore require `X-Admin-Key`; the audit actor is taken from the
+`X-Actor` header, not the request body. See [SECURITY.md](SECURITY.md) for the
+production hardening checklist.
 
 ## Task runner
 
@@ -116,9 +144,12 @@ just lint            # clippy + go vet
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) - components and the event pipeline
+- [Architecture](docs/architecture.md) - components, the event pipeline, and reconciliation
 - [Go vs Rust parity](docs/parity-matrix.md)
+- [Event schema](docs/event-schema.md) - envelope and versioning policy
 - [Messaging ADR](docs/adr/0001-messaging-broker.md) and [benchmarks](docs/benchmarks.md)
+- [Backup and disaster recovery](docs/backup-dr.md)
+- [Threat model](docs/threat-model.md)
 - [Contributing](CONTRIBUTING.md) - setup, tasks, conventions
 - [Security policy](SECURITY.md)
 
