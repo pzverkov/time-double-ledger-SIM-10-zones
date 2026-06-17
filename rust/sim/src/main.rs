@@ -18,6 +18,7 @@ use time_ledger_sim_rust::messaging::store::PgStore;
 use time_ledger_sim_rust::messaging::{analytics, fraud, nats, outbox};
 use time_ledger_sim_rust::middleware::cors;
 use time_ledger_sim_rust::otel;
+use time_ledger_sim_rust::ratelimit;
 use time_ledger_sim_rust::state::{AppState, init_metrics};
 
 type Publisher = Arc<dyn EventPublisher>;
@@ -260,13 +261,26 @@ async fn main() {
         metrics: metrics_state,
     };
 
+    // Per-client rate limit on the public write path (0 disables; see config).
+    let rate_limit_rps = env::var("RATE_LIMIT_RPS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(time_ledger_sim_rust::config::DEFAULT_RATE_LIMIT_RPS);
+    let limiter = Arc::new(ratelimit::RateLimiter::new(rate_limit_rps, rate_limit_rps));
+
     let app = Router::new()
         .route("/healthz", get(admin::healthz))
         .route("/readyz", get(admin::readyz))
         .route("/metrics", get(admin::metrics))
         .route("/v1/version", get(admin::version))
         .route("/v1/zones", get(zones::list_zones))
-        .route("/v1/transfers", post(transfers::create_transfer))
+        .route(
+            "/v1/transfers",
+            post(transfers::create_transfer).layer(middleware::from_fn_with_state(
+                limiter.clone(),
+                ratelimit::rate_limit,
+            )),
+        )
         .route("/v1/balances", get(balances::list_balances))
         .route("/v1/transactions", get(transactions::list_transactions))
         .route(
@@ -313,14 +327,19 @@ async fn main() {
     let addr: SocketAddr = format!("0.0.0.0:{port}").parse().unwrap();
     info!(%addr, "sim-rust listening");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            tokio::signal::ctrl_c().await.ok();
-            info!("shutting down");
-            cancel.cancel();
-        })
-        .await
-        .unwrap();
+    // ConnectInfo carries the peer address so the rate limiter can key on it
+    // when no forwarding headers are present.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        tokio::signal::ctrl_c().await.ok();
+        info!("shutting down");
+        cancel.cancel();
+    })
+    .await
+    .unwrap();
 
     // Flush buffered spans before the runtime tears down.
     if let Some(p) = otel_provider {

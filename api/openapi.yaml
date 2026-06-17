@@ -96,6 +96,8 @@ paths:
                 $ref: "#/components/schemas/TransferSpooledResponse"
         "409":
           description: Idempotency conflict
+        "429":
+          description: Rate limit exceeded
         "503":
           description: Zone blocked
 
