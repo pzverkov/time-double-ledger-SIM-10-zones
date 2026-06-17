@@ -69,13 +69,23 @@ pub fn admin_guard(st: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
                 .get("x-admin-key")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            if got == k {
+            if constant_time_eq(got.as_bytes(), k.as_bytes()) {
                 Ok(())
             } else {
                 Err(unauthorized())
             }
         }
     }
+}
+
+/// Constant-time byte equality so an attacker cannot recover the admin key by
+/// timing how early a mismatch is rejected. Length mismatch short-circuits (the
+/// key length is not the secret).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// Authenticate an operator mutation and derive the audit actor from the request
@@ -349,8 +359,17 @@ pub async fn restore(
 
 #[cfg(test)]
 mod tests {
-    use super::actor_from_headers;
+    use super::{actor_from_headers, constant_time_eq};
     use axum::http::HeaderMap;
+
+    #[test]
+    fn constant_time_eq_matches_only_equal_bytes() {
+        assert!(constant_time_eq(b"secret-key", b"secret-key"));
+        assert!(!constant_time_eq(b"secret-key", b"secret-keX"));
+        assert!(!constant_time_eq(b"secret-key", b"secret-ke"));
+        assert!(!constant_time_eq(b"", b"x"));
+        assert!(constant_time_eq(b"", b""));
+    }
 
     #[test]
     fn actor_defaults_to_operator_when_absent() {
