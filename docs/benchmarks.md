@@ -65,6 +65,64 @@ workload actually outgrows it.
 
 Attach a Grafana screenshot of `outbox_backlog` and request rate over the run.
 
+## Go vs Rust backend
+
+A head-to-head of the two backends on an identical workload (both on NATS).
+
+### Methodology
+
+Lean CI stack (`ci/docker-compose.test.yml`: Postgres + NATS, no observability
+overhead) with `RATE_LIMIT_RPS=0` so the limiter does not cap the run. Both images
+built from `main` (0.4.1). The two backends share one Postgres and one NATS, so
+they were run **one at a time** (the other stopped) to avoid pool and shared-durable
+contention. API load via `transfers.k6.js` at two rates: 200 req/s (unsaturated)
+and 1000 req/s (saturation). Pipeline drain fires N=5000 transfers and times the
+fraud-consumer inbox to drain (the metric both backends share; `pipeline_lag.sh`
+measures the analytics group, which is Rust-only).
+
+### Results
+
+Run: 2026-06-18. Host: Apple M1 Pro, 8 cores, 16 GB, macOS 26.5; Docker 29.5.
+Postgres 16.13, NATS 2.12.5. Pool size 16 on both. All runs 0% failed.
+
+| Metric | Go | Rust |
+| ------ | -- | ---- |
+| Latency p50 @ 200 rps (ms) | 2.3 | 3.5 |
+| Latency p95 @ 200 rps (ms) | 6.8 | 16.3 |
+| Latency p99 @ 200 rps (ms) | 324.8 | 99.1 |
+| Sustained throughput @ target 1000 rps (req/s) | 1000 | 890 |
+| Latency p50 @ 1000 rps (ms) | 2.5 | 1380 |
+| Latency p95 @ 1000 rps (ms) | 243.7 | 2120 |
+| Latency p99 @ 1000 rps (ms) | 369.4 | 2170 |
+| Pipeline drain (events/s, ingest-bound) | 196 | 191 |
+
+### How to read these numbers (the caveats are the point)
+
+This compares the two **as-configured deployments**, not the languages in
+isolation. The Rust deployment does strictly more work per event and that, not
+engine speed, drives the difference under load:
+
+- **At moderate load (200 rps) both are fast and comparable.** Go has the lower
+  median (2.3 vs 3.5 ms); Rust has the tighter tail (p99 99 vs 325 ms - Go shows
+  occasional GC/connection-churn spikes). Neither saturates.
+- **At 1000 rps the Rust deployment saturates its connection pool, Go does not.**
+  Rust additionally runs the **analytics fan-out consumer (a second consumer
+  group) and the reconciliation job**, which Go does not, and uses **`Verified`
+  pool recycling** (a validation round-trip per checkout) where Go uses periodic
+  health checks. All of that contends on the same 16-connection pool, so under
+  saturation the API path queues behind it (p50 climbs to ~1.4 s and throughput
+  caps at ~890 rps). The healthy 200-rps baseline confirms this is contention, not
+  per-request engine cost.
+- **Pipeline drain is ingest-bound (~200 events/s)** by the `xargs -P50` curl
+  harness, so it does not separate the engines; both keep pace, and Rust does so
+  while also folding the analytics aggregate.
+
+Actionable follow-up (tracked for a later pass): give the Rust API path headroom
+under saturation by tuning the pool (`Fast` recycling or a recycle timeout, a
+larger `max_size`) and/or running reconciliation on a separate pool, then re-run
+the 1000-rps comparison. The seam and correctness are unaffected; this is a
+throughput-tuning item.
+
 ## Notes
 
 - Both brokers carry the same correctness guarantees here: idempotency comes from
