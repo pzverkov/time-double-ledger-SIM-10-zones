@@ -44,19 +44,19 @@ lint-rust:
 # Build all
 build: build-go build-rust
 
-# Build Go binary
+# Build Go binary (injects commit + date; version comes from version.go)
 build-go:
-    cd go && go build -o ../out/sim-go ./cmd/sim-go
+    cd go && go build -ldflags "-X 'time-ledger-sim/go/internal/web.buildCommit=$(git rev-parse --short HEAD)' -X 'time-ledger-sim/go/internal/web.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)'" -o ../out/sim-go ./cmd/sim-go
 
-# Build Rust binary (release)
+# Build Rust binary (release; injects commit + date for option_env!)
 build-rust:
-    cd rust/sim && cargo build --release
+    cd rust/sim && GIT_SHA=$(git rev-parse --short HEAD) BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) cargo build --release
 
 # -- Infrastructure ------------------------------------------------
 
-# Start dev infrastructure (Docker Compose)
+# Start dev infrastructure (Docker Compose); stamps images with commit + date
 infra-up:
-    cd infra && docker compose up -d --build
+    cd infra && export BUILD_COMMIT=$(git rev-parse --short HEAD) && export BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) && docker compose up -d --build
 
 # Stop dev infrastructure
 infra-down:

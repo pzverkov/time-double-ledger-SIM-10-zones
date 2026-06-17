@@ -63,6 +63,9 @@ services:
     build:
       context: ../go
       dockerfile: Dockerfile
+      args:
+        BUILD_COMMIT: "${BUILD_COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -81,6 +84,9 @@ services:
     build:
       context: ../rust/sim
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: "${BUILD_COMMIT:-}"
+        BUILD_TIME: "${BUILD_DATE:-}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -121,6 +127,8 @@ services:
       dockerfile: Dockerfile
       args:
         REDPANDA: "1"
+        GIT_SHA: "${BUILD_COMMIT:-}"
+        BUILD_TIME: "${BUILD_DATE:-}"
     depends_on:
       migrate:
         condition: service_completed_successfully
