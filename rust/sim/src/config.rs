@@ -37,6 +37,10 @@ pub const DLQ_RETENTION_SECS: i64 = 30 * 24 * 3600;
 /// `RATE_LIMIT_RPS` is unset. `0` disables limiting.
 pub const DEFAULT_RATE_LIMIT_RPS: u32 = 50;
 
+/// Schema version stamped on every published event. Bump on a breaking change
+/// to the event envelope; consumers reject versions they do not support.
+pub const EVENT_SCHEMA_VERSION: i64 = 1;
+
 /// Known weak/example admin keys that must never guard a production deployment.
 pub const WEAK_ADMIN_KEYS: &[&str] = &[
     "dev-admin-key",

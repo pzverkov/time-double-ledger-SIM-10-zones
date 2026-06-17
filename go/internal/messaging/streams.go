@@ -9,6 +9,9 @@ import (
 
 const (
 	StreamName = "EVENTS"
+	// EventSchemaVersion is stamped on every published event; bump on a breaking
+	// envelope change. Consumers reject versions they do not support.
+	EventSchemaVersion = 1
 )
 
 func EnsureStreams(ctx context.Context, js nats.JetStreamContext) error {
