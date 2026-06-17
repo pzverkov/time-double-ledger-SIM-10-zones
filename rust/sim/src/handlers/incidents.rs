@@ -1,11 +1,13 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
+    http::HeaderMap,
 };
 use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::AppError;
+use crate::handlers::admin;
 use crate::state::AppState;
 use crate::util::fmt_rfc3339;
 
@@ -88,19 +90,16 @@ pub struct IncidentActionRequest {
     #[serde(default)]
     pub note: String,
     #[serde(default)]
-    pub actor: String,
-    #[serde(default)]
     pub reason: String,
 }
 
 pub async fn apply_incident_action(
     State(st): State<AppState>,
     Path(incident_id): Path<String>,
+    headers: HeaderMap,
     Json(req): Json<IncidentActionRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if req.actor.is_empty() {
-        return Err(AppError::BadRequest("actor required".into()));
-    }
+    let actor = admin::authenticate_operator(&st, &headers)?;
     if req.action != "ACK" && req.action != "ASSIGN" && req.action != "RESOLVE" {
         return Err(AppError::BadRequest(
             "action must be ACK, ASSIGN, or RESOLVE".into(),
@@ -133,7 +132,7 @@ pub async fn apply_incident_action(
     if !req.note.is_empty() {
         let entry = json!({
             "at": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
-            "actor": req.actor,
+            "actor": actor,
             "note": req.note,
             "action": req.action,
         });
@@ -170,7 +169,7 @@ pub async fn apply_incident_action(
     let audit_action = format!("INCIDENT_{}", req.action);
     tx.execute(
         "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,$2,'incident',$3,$4, jsonb_build_object('assignee',$5::text,'note',$6::text,'status',$7::text))",
-        &[&req.actor, &audit_action, &incident_id, &req.reason, &req.assignee, &req.note, &new_status],
+        &[&actor, &audit_action, &incident_id, &req.reason, &req.assignee, &req.note, &new_status],
     ).await?;
 
     tx.commit().await?;
