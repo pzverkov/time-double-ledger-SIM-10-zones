@@ -87,7 +87,7 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
 	r.Handle("/metrics", promhttp.Handler())
 
-	api := web.NewAPI(cfg.AdminKey, cfg.RateLimitRPS, led, logger)
+	api := web.NewAPI(cfg.AdminKey, cfg.RateLimitRPS, cfg.TrustProxy, led, logger)
 	api.RegisterRoutes(r)
 
 	a.router = r

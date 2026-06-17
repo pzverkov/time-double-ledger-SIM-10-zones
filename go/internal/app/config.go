@@ -17,6 +17,7 @@ type Config struct {
 	AdminKey         string
 	AppEnv           string
 	RateLimitRPS     int
+	TrustProxy       bool
 }
 
 // Default per-client request rate (tokens/sec) on the public write path when
@@ -43,6 +44,7 @@ func LoadConfigFromEnv() Config {
 			cfg.RateLimitRPS = n
 		}
 	}
+	cfg.TrustProxy = os.Getenv("TRUST_PROXY_HEADERS") == "true" || os.Getenv("TRUST_PROXY_HEADERS") == "1"
 	if cfg.CorsAllowOrigins == "" {
 		cfg.CorsAllowOrigins = "http://localhost:5173,http://localhost:4173"
 	}

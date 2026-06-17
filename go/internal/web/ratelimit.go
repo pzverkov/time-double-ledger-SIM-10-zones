@@ -9,16 +9,19 @@ import (
 	"time"
 )
 
-// Per-client token-bucket rate limiter for the public write path. Keyed by
-// client IP (X-Forwarded-For / X-Real-IP, falling back to RemoteAddr). rps
+// Per-client token-bucket rate limiter for the public write path. By default
+// the key is the peer address; forwarding headers (X-Forwarded-For / X-Real-IP)
+// are honored only when trustProxy is set, i.e. the service sits behind a
+// trusted proxy that sets them. Trusting those headers unconditionally would
+// let a direct caller spoof a fresh key per request and bypass the limit. rps
 // tokens accrue per second up to a burst ceiling; a request costs one token.
-// Disabled when rps == 0 (used by the contract-test stack so fuzzing is not
+// Disabled when rps == 0 (the contract-test stack sets 0 so fuzzing is not
 // throttled). App-level limiting is a backstop; a real edge deployment should
 // also rate-limit at the gateway.
 
 const (
-	rlGCThreshold = 8192
-	rlIdleTTL     = 60 * time.Second
+	rlMaxBuckets = 8192
+	rlIdleTTL    = 60 * time.Second
 )
 
 type rlBucket struct {
@@ -27,14 +30,20 @@ type rlBucket struct {
 }
 
 type rateLimiter struct {
-	rps     float64
-	burst   float64
-	mu      sync.Mutex
-	buckets map[string]*rlBucket
+	rps        float64
+	burst      float64
+	trustProxy bool
+	mu         sync.Mutex
+	buckets    map[string]*rlBucket
 }
 
-func newRateLimiter(rps int) *rateLimiter {
-	return &rateLimiter{rps: float64(rps), burst: float64(rps), buckets: map[string]*rlBucket{}}
+func newRateLimiter(rps int, trustProxy bool) *rateLimiter {
+	return &rateLimiter{
+		rps:        float64(rps),
+		burst:      float64(rps),
+		trustProxy: trustProxy,
+		buckets:    map[string]*rlBucket{},
+	}
 }
 
 func (rl *rateLimiter) enabled() bool { return rl.rps > 0 }
@@ -46,12 +55,10 @@ func (rl *rateLimiter) allow(key string, now time.Time) bool {
 	}
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	if len(rl.buckets) > rlGCThreshold {
-		for k, b := range rl.buckets {
-			if now.Sub(b.last) > rlIdleTTL {
-				delete(rl.buckets, k)
-			}
-		}
+	// Bound the map: only when a new key would push us past the cap, drop idle
+	// entries, then evict the oldest if still full.
+	if _, ok := rl.buckets[key]; !ok && len(rl.buckets) >= rlMaxBuckets {
+		rl.evictLocked(now)
 	}
 	b := rl.buckets[key]
 	if b == nil {
@@ -68,15 +75,39 @@ func (rl *rateLimiter) allow(key string, now time.Time) bool {
 	return false
 }
 
-// clientKey is the first X-Forwarded-For hop, then X-Real-IP, then RemoteAddr.
-func clientKey(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
-			return first
+func (rl *rateLimiter) evictLocked(now time.Time) {
+	for k, b := range rl.buckets {
+		if now.Sub(b.last) > rlIdleTTL {
+			delete(rl.buckets, k)
 		}
 	}
-	if rip := strings.TrimSpace(r.Header.Get("X-Real-IP")); rip != "" {
-		return rip
+	if len(rl.buckets) < rlMaxBuckets {
+		return
+	}
+	var oldestKey string
+	var oldest time.Time
+	for k, b := range rl.buckets {
+		if oldestKey == "" || b.last.Before(oldest) {
+			oldestKey, oldest = k, b.last
+		}
+	}
+	if oldestKey != "" {
+		delete(rl.buckets, oldestKey)
+	}
+}
+
+// clientKey is the peer address, unless trustProxy is set, in which case the
+// first X-Forwarded-For hop then X-Real-IP take precedence.
+func (rl *rateLimiter) clientKey(r *http.Request) string {
+	if rl.trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if first := strings.TrimSpace(strings.Split(xff, ",")[0]); first != "" {
+				return first
+			}
+		}
+		if rip := strings.TrimSpace(r.Header.Get("X-Real-IP")); rip != "" {
+			return rip
+		}
 	}
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
@@ -86,7 +117,7 @@ func clientKey(r *http.Request) string {
 
 func (rl *rateLimiter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !rl.allow(clientKey(r), time.Now()) {
+		if !rl.allow(rl.clientKey(r), time.Now()) {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "rate limited", http.StatusTooManyRequests)
 			return
