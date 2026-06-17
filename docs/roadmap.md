@@ -19,7 +19,7 @@ This project is a finance-flavored simulation game: double-entry ledger, idempot
 **Goal:** publish code without publishing danger.  
 **What we do:**
 - No secrets in repo.
-- Operator endpoints (controls, snapshot/restore) require `ADMIN_KEY`.
+- Operator mutations (zone status/controls, spool replay, incident actions) and snapshot/restore require `ADMIN_KEY`; the audit actor comes from `X-Actor`.
 - Logs avoid raw user metadata / accidental PII.
 **Trade-off:** a bit of setup, a lot less regret.
 
@@ -110,7 +110,7 @@ We start as a monorepo for speed. Later, we split without rewriting.
 ### Next
 - Add dependency graph editor in UI (instead of hardcoded deps)
 - Add "runbook checklist" per incident (stored in incident.details JSON)
-- Add reconciliation job (ledger invariant checks) + report panel
+- Reconciliation job (ledger invariant checks): done (Rust, drift gauges); UI report panel still pending
 
 ### Later
 - Digest-pinned container images
