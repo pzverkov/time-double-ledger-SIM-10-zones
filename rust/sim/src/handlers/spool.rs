@@ -1,12 +1,14 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::HeaderMap,
 };
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::config::THROTTLE_MAX_PCT;
 use crate::error::AppError;
+use crate::handlers::admin;
 use crate::handlers::transfers::{TransferInput, apply_transfer_bypass};
 use crate::state::AppState;
 
@@ -43,8 +45,6 @@ pub struct ReplayRequest {
     #[serde(default = "default_limit")]
     pub limit: i64,
     #[serde(default)]
-    pub actor: String,
-    #[serde(default)]
     pub reason: String,
 }
 
@@ -62,8 +62,10 @@ pub struct ReplayResult {
 pub async fn replay_spool(
     State(st): State<AppState>,
     Path(zone_id): Path<String>,
+    headers: HeaderMap,
     Json(req): Json<ReplayRequest>,
 ) -> Result<Json<ReplayResult>, AppError> {
+    let actor = admin::authenticate_operator(&st, &headers)?;
     let limit = req.limit.clamp(1, 500);
     let client = st.db.get().await?;
 
@@ -160,7 +162,7 @@ pub async fn replay_spool(
     if let Err(e) = client
         .execute(
             "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'REPLAY_SPOOL','zone',$2,$3, jsonb_build_object('applied',$4::bigint,'failed',$5::bigint,'limit',$6::bigint))",
-            &[&req.actor, &zone_id, &req.reason, &applied, &failed, &limit],
+            &[&actor, &zone_id, &req.reason, &applied, &failed, &limit],
         )
         .await
     {
