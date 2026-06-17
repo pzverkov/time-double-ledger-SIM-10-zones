@@ -1,11 +1,13 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::HeaderMap,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::AppError;
+use crate::handlers::admin;
 use crate::state::AppState;
 use crate::util::fmt_rfc3339;
 
@@ -45,7 +47,6 @@ pub async fn list_zones(State(st): State<AppState>) -> Result<Json<serde_json::V
 #[derive(Deserialize)]
 pub struct SetZoneStatusRequest {
     status: String,
-    actor: String,
     #[serde(default)]
     reason: String,
 }
@@ -53,11 +54,10 @@ pub struct SetZoneStatusRequest {
 pub async fn set_zone_status(
     State(st): State<AppState>,
     Path(zone_id): Path<String>,
+    headers: HeaderMap,
     Json(req): Json<SetZoneStatusRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    if req.actor.is_empty() {
-        return Err(AppError::BadRequest("actor required".into()));
-    }
+    let actor = admin::authenticate_operator(&st, &headers)?;
     if req.status != "OK" && req.status != "DEGRADED" && req.status != "DOWN" {
         return Err(AppError::BadRequest(
             "status must be OK, DEGRADED, or DOWN".into(),
@@ -75,14 +75,14 @@ pub async fn set_zone_status(
 
     tx.execute(
         "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_STATUS','zone',$2,$3, jsonb_build_object('status',$4::text))",
-        &[&req.actor, &zone_id, &req.reason, &req.status],
+        &[&actor, &zone_id, &req.reason, &req.status],
     )
     .await?;
 
     if req.status == "DOWN" {
         tx.execute(
             "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,'CRITICAL','Zone marked DOWN', jsonb_build_object('reason',$2::text,'actor',$3::text))",
-            &[&zone_id, &req.reason, &req.actor],
+            &[&zone_id, &req.reason, &actor],
         )
         .await?;
     }

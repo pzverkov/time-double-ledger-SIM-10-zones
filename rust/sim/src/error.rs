@@ -4,6 +4,7 @@ use serde_json::json;
 #[derive(Debug)]
 pub enum AppError {
     BadRequest(String),
+    Unauthorized(String),
     NotFound(String),
     Conflict(String),
     Unavailable(String),
@@ -19,6 +20,7 @@ impl IntoResponse for AppError {
         }
         let (status, code, message) = match self {
             Self::BadRequest(m) => (StatusCode::BAD_REQUEST, "bad_request", m),
+            Self::Unauthorized(m) => (StatusCode::UNAUTHORIZED, "unauthorized", m),
             Self::NotFound(m) => (StatusCode::NOT_FOUND, "not_found", m),
             Self::Conflict(m) => (StatusCode::CONFLICT, "conflict", m),
             Self::Unavailable(m) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable", m),
@@ -64,6 +66,13 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["code"], "bad_request");
         assert_eq!(body["error"], "bad field");
+    }
+
+    #[tokio::test]
+    async fn unauthorized_returns_401() {
+        let (status, body) = error_body(AppError::Unauthorized("unauthorized".into())).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["code"], "unauthorized");
     }
 
     #[tokio::test]

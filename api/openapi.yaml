@@ -44,10 +44,17 @@ paths:
   /v1/zones/{zone_id}/status:
     post:
       summary: Set zone status
+      security:
+        - AdminKey: []
       parameters:
         - name: zone_id
           in: path
           required: true
+          schema: { type: string }
+        - name: X-Actor
+          in: header
+          required: false
+          description: Operator name recorded as the audit actor (trusted only post-auth).
           schema: { type: string }
       requestBody:
         required: true
@@ -62,6 +69,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Zone"
+        "401":
+          description: Unauthorized
 
   /v1/transfers:
     post:
@@ -221,10 +230,17 @@ paths:
   /v1/incidents/{incident_id}/action:
     post:
       summary: Apply incident action
+      security:
+        - AdminKey: []
       parameters:
         - name: incident_id
           in: path
           required: true
+          schema: { type: string }
+        - name: X-Actor
+          in: header
+          required: false
+          description: Operator name recorded as the audit actor (trusted only post-auth).
           schema: { type: string }
       requestBody:
         required: true
@@ -239,6 +255,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/IncidentDetail"
+        "401":
+          description: Unauthorized
 
   /v1/zones/{zone_id}/controls:
     get:
@@ -257,10 +275,17 @@ paths:
                 $ref: "#/components/schemas/ZoneControls"
     post:
       summary: Set zone controls
+      security:
+        - AdminKey: []
       parameters:
         - name: zone_id
           in: path
           required: true
+          schema: { type: string }
+        - name: X-Actor
+          in: header
+          required: false
+          description: Operator name recorded as the audit actor (trusted only post-auth).
           schema: { type: string }
       requestBody:
         required: true
@@ -275,6 +300,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ZoneControls"
+        "401":
+          description: Unauthorized
 
   /v1/zones/{zone_id}/spool:
     get:
@@ -295,10 +322,17 @@ paths:
   /v1/zones/{zone_id}/spool/replay:
     post:
       summary: Replay spooled transfers
+      security:
+        - AdminKey: []
       parameters:
         - name: zone_id
           in: path
           required: true
+          schema: { type: string }
+        - name: X-Actor
+          in: header
+          required: false
+          description: Operator name recorded as the audit actor (trusted only post-auth).
           schema: { type: string }
       requestBody:
         required: false
@@ -313,6 +347,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReplayResult"
+        "401":
+          description: Unauthorized
 
   /v1/zones/{zone_id}/audit:
     get:
@@ -343,6 +379,8 @@ paths:
   /v1/sim/snapshot:
     post:
       summary: Export snapshot (admin)
+      security:
+        - AdminKey: []
       responses:
         "200":
           description: Snapshot
@@ -350,12 +388,14 @@ paths:
             application/json:
               schema:
                 type: object
-        "403":
-          description: Forbidden
+        "401":
+          description: Unauthorized
 
   /v1/sim/restore:
     post:
       summary: Restore snapshot (admin)
+      security:
+        - AdminKey: []
       requestBody:
         required: true
         content:
@@ -365,10 +405,15 @@ paths:
       responses:
         "200":
           description: OK
-        "403":
-          description: Forbidden
+        "401":
+          description: Unauthorized
 
 components:
+  securitySchemes:
+    AdminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
   schemas:
     VersionInfo:
       type: object
@@ -391,9 +436,8 @@ components:
       type: object
       properties:
         status: { type: string, enum: [OK, DEGRADED, DOWN] }
-        actor: { type: string }
         reason: { type: string }
-      required: [status, actor]
+      required: [status]
 
     TransferRequest:
       type: object
@@ -497,9 +541,8 @@ components:
         action: { type: string, enum: [ACK, ASSIGN, RESOLVE] }
         assignee: { type: string }
         note: { type: string }
-        actor: { type: string }
         reason: { type: string }
-      required: [action, actor]
+      required: [action]
 
     ZoneControls:
       type: object
@@ -517,7 +560,6 @@ components:
         writes_blocked: { type: boolean }
         cross_zone_throttle: { type: integer, minimum: 0, maximum: 100 }
         spool_enabled: { type: boolean }
-        actor: { type: string }
         reason: { type: string }
 
     SpoolStats:
@@ -533,7 +575,6 @@ components:
       type: object
       properties:
         limit: { type: integer, default: 50 }
-        actor: { type: string }
         reason: { type: string }
 
     ReplayResult:

@@ -61,18 +61,41 @@ pub async fn metrics(State(st): State<AppState>) -> impl IntoResponse {
 }
 
 pub fn admin_guard(st: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
-    // Preserves the existing 400 response for an unauthorized admin call.
-    let forbidden = || AppError::BadRequest("forbidden".into());
+    let unauthorized = || AppError::Unauthorized("unauthorized".into());
     match &st.admin_key {
-        None => Err(forbidden()),
+        None => Err(unauthorized()),
         Some(k) => {
             let got = headers
                 .get("x-admin-key")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            if got == k { Ok(()) } else { Err(forbidden()) }
+            if got == k {
+                Ok(())
+            } else {
+                Err(unauthorized())
+            }
         }
     }
+}
+
+/// Authenticate an operator mutation and derive the audit actor from the request
+/// identity. The actor is the `X-Actor` header (or "operator" if absent), trusted
+/// only because the admin key was validated, so the audit log cannot record a
+/// forged actor on an unauthenticated request.
+pub fn authenticate_operator(st: &AppState, headers: &HeaderMap) -> Result<String, AppError> {
+    admin_guard(st, headers)?;
+    Ok(actor_from_headers(headers))
+}
+
+/// The audit actor from the `X-Actor` header, or "operator" when absent/blank.
+fn actor_from_headers(headers: &HeaderMap) -> String {
+    headers
+        .get("x-actor")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("operator")
+        .to_string()
 }
 
 pub async fn snapshot(
@@ -322,4 +345,29 @@ pub async fn restore(
 
     tx.commit().await?;
     Ok(Json(json!({"status": "ok"})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::actor_from_headers;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn actor_defaults_to_operator_when_absent() {
+        assert_eq!(actor_from_headers(&HeaderMap::new()), "operator");
+    }
+
+    #[test]
+    fn actor_uses_x_actor_header() {
+        let mut h = HeaderMap::new();
+        h.insert("x-actor", "alice".parse().unwrap());
+        assert_eq!(actor_from_headers(&h), "alice");
+    }
+
+    #[test]
+    fn blank_actor_falls_back_to_operator() {
+        let mut h = HeaderMap::new();
+        h.insert("x-actor", "   ".parse().unwrap());
+        assert_eq!(actor_from_headers(&h), "operator");
+    }
 }

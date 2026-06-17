@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -34,20 +35,20 @@ func (a *API) RegisterRoutes(r chi.Router) {
 	r.Get("/v1/transactions", a.handleListTransactions)
 	r.Get("/v1/transactions/{transaction_id}", a.handleGetTransaction)
 
-	r.Post("/v1/zones/{zone_id}/status", a.handleSetZoneStatus)
+	r.Post("/v1/zones/{zone_id}/status", a.admin(a.handleSetZoneStatus))
 
 	// incidents
 	r.Get("/v1/zones/{zone_id}/incidents", a.handleListIncidentsByZone)
 	r.Get("/v1/incidents", a.handleListRecentIncidents)
 	r.Get("/v1/incidents/{incident_id}", a.handleGetIncident)
-	r.Post("/v1/incidents/{incident_id}/action", a.handleIncidentAction)
+	r.Post("/v1/incidents/{incident_id}/action", a.admin(a.handleIncidentAction))
 
 	// ops controls + spool + audit
 	r.Get("/v1/zones/{zone_id}/controls", a.handleGetZoneControls)
-	r.Post("/v1/zones/{zone_id}/controls", a.handleSetZoneControls)
+	r.Post("/v1/zones/{zone_id}/controls", a.admin(a.handleSetZoneControls))
 
 	r.Get("/v1/zones/{zone_id}/spool", a.handleGetSpoolStats)
-	r.Post("/v1/zones/{zone_id}/spool/replay", a.handleReplaySpool)
+	r.Post("/v1/zones/{zone_id}/spool/replay", a.admin(a.handleReplaySpool))
 
 	r.Get("/v1/zones/{zone_id}/audit", a.handleListAudit)
 
@@ -58,16 +59,22 @@ func (a *API) RegisterRoutes(r chi.Router) {
 
 func (a *API) admin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if a.adminKey == "" {
-			http.Error(w, "admin disabled", http.StatusForbidden)
-			return
-		}
-		if r.Header.Get("X-Admin-Key") != a.adminKey {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		if a.adminKey == "" || r.Header.Get("X-Admin-Key") != a.adminKey {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next(w, r)
 	}
+}
+
+// actorFromRequest derives the audit actor from the request identity. It is the
+// X-Actor header (or "operator" if absent), trusted only because the request
+// already passed the admin guard, so the audit log cannot record a forged actor.
+func actorFromRequest(r *http.Request) string {
+	if a := strings.TrimSpace(r.Header.Get("X-Actor")); a != "" {
+		return a
+	}
+	return "operator"
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -202,7 +209,6 @@ func (a *API) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 
 type SetZoneStatusRequest struct {
 	Status string `json:"status"`
-	Actor  string `json:"actor"`
 	Reason string `json:"reason"`
 }
 
@@ -213,11 +219,11 @@ func (a *API) handleSetZoneStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", 400)
 		return
 	}
-	if zoneID == "" || req.Status == "" || req.Actor == "" {
+	if zoneID == "" || req.Status == "" {
 		http.Error(w, "missing fields", 400)
 		return
 	}
-	z, err := a.led.SetZoneStatus(r.Context(), zoneID, req.Status, req.Actor, req.Reason)
+	z, err := a.led.SetZoneStatus(r.Context(), zoneID, req.Status, actorFromRequest(r), req.Reason)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -276,7 +282,6 @@ type SetZoneControlsRequest struct {
 	WritesBlocked     bool   `json:"writes_blocked"`
 	CrossZoneThrottle int    `json:"cross_zone_throttle"`
 	SpoolEnabled      bool   `json:"spool_enabled"`
-	Actor             string `json:"actor"`
 	Reason            string `json:"reason"`
 }
 
@@ -287,11 +292,11 @@ func (a *API) handleSetZoneControls(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", 400)
 		return
 	}
-	if zoneID == "" || req.Actor == "" {
+	if zoneID == "" {
 		http.Error(w, "missing fields", 400)
 		return
 	}
-	c, err := a.led.SetZoneControls(r.Context(), zoneID, req.WritesBlocked, req.CrossZoneThrottle, req.SpoolEnabled, req.Actor, req.Reason)
+	c, err := a.led.SetZoneControls(r.Context(), zoneID, req.WritesBlocked, req.CrossZoneThrottle, req.SpoolEnabled, actorFromRequest(r), req.Reason)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -311,7 +316,6 @@ func (a *API) handleGetSpoolStats(w http.ResponseWriter, r *http.Request) {
 
 type ReplaySpoolRequest struct {
 	Limit  int    `json:"limit"`
-	Actor  string `json:"actor"`
 	Reason string `json:"reason"`
 }
 
@@ -322,11 +326,11 @@ func (a *API) handleReplaySpool(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", 400)
 		return
 	}
-	if zoneID == "" || req.Actor == "" {
+	if zoneID == "" {
 		http.Error(w, "missing fields", 400)
 		return
 	}
-	res, err := a.led.ReplaySpool(r.Context(), zoneID, req.Limit, req.Actor, req.Reason)
+	res, err := a.led.ReplaySpool(r.Context(), zoneID, req.Limit, actorFromRequest(r), req.Reason)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -354,7 +358,6 @@ type IncidentActionRequest struct {
 	Action   string `json:"action"` // ACK|ASSIGN|RESOLVE
 	Assignee string `json:"assignee"`
 	Note     string `json:"note"`
-	Actor    string `json:"actor"`
 	Reason   string `json:"reason"`
 }
 
@@ -365,7 +368,7 @@ func (a *API) handleIncidentAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", 400)
 		return
 	}
-	if id == "" || req.Actor == "" || req.Action == "" {
+	if id == "" || req.Action == "" {
 		http.Error(w, "missing fields", 400)
 		return
 	}
@@ -374,7 +377,7 @@ func (a *API) handleIncidentAction(w http.ResponseWriter, r *http.Request) {
 		Action:   req.Action,
 		Assignee: req.Assignee,
 		Note:     req.Note,
-		Actor:    req.Actor,
+		Actor:    actorFromRequest(r),
 		Reason:   req.Reason,
 	})
 	if err != nil {

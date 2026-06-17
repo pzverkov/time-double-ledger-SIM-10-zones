@@ -1,11 +1,13 @@
 use axum::{
     Json,
     extract::{Path, State},
+    http::HeaderMap,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::config::THROTTLE_MAX_PCT;
 use crate::error::AppError;
+use crate::handlers::admin;
 use crate::state::AppState;
 use crate::util::fmt_rfc3339;
 
@@ -71,16 +73,16 @@ pub struct SetZoneControlsRequest {
     pub cross_zone_throttle: Option<i32>,
     pub spool_enabled: Option<bool>,
     #[serde(default)]
-    pub actor: String,
-    #[serde(default)]
     pub reason: String,
 }
 
 pub async fn set_zone_controls(
     State(st): State<AppState>,
     Path(zone_id): Path<String>,
+    headers: HeaderMap,
     Json(req): Json<SetZoneControlsRequest>,
 ) -> Result<Json<ZoneControls>, AppError> {
+    let actor = admin::authenticate_operator(&st, &headers)?;
     let wb = req.writes_blocked.unwrap_or(false);
     let throttle = req.cross_zone_throttle.unwrap_or(THROTTLE_MAX_PCT);
     let spool = req.spool_enabled.unwrap_or(false);
@@ -110,7 +112,7 @@ pub async fn set_zone_controls(
 
     tx.execute(
         "INSERT INTO audit_log(actor,action,target_type,target_id,reason,details) VALUES($1,'SET_ZONE_CONTROLS','zone',$2,$3, jsonb_build_object('writes_blocked',$4::bool,'cross_zone_throttle',$5::int,'spool_enabled',$6::bool))",
-        &[&req.actor, &zone_id, &req.reason, &wb, &throttle, &spool],
+        &[&actor, &zone_id, &req.reason, &wb, &throttle, &spool],
     )
     .await?;
 
@@ -123,7 +125,7 @@ pub async fn set_zone_controls(
         };
         tx.execute(
             "INSERT INTO incidents(zone_id,severity,title,details) VALUES($1,$2,$3, jsonb_build_object('reason',$4::text,'actor',$5::text,'writes_blocked',$6::bool,'cross_zone_throttle',$7::int,'spool_enabled',$8::bool))",
-            &[&zone_id, &sev, &title, &req.reason, &req.actor, &wb, &throttle, &spool],
+            &[&zone_id, &sev, &title, &req.reason, &actor, &wb, &throttle, &spool],
         )
         .await?;
     }
