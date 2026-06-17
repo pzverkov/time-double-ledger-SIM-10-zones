@@ -1,8 +1,8 @@
 # Go vs Rust parity matrix
 
 Both backends implement the same HTTP API (validated in CI by Schemathesis against
-`api/openapi.yaml`). They diverge only in messaging, where the Rust backend is
-currently ahead.
+`api/openapi.yaml`). They diverge in messaging and in a few periodic ops jobs,
+where the Rust backend is currently ahead.
 
 ## HTTP API (full parity)
 
@@ -40,9 +40,24 @@ currently ahead.
 | Redpanda / Kafka API | no | yes (`--features redpanda`) |
 | Explicit ack-on-success, bounded redelivery, poison drop | partial | yes |
 | Trace context propagated across the broker | no | yes |
+| Dead-letter queue for poison events | no | yes |
+| Event `schema_version` stamped + unknown version rejected | yes | yes |
+
+## Security and resilience
+
+| Capability | Go | Rust |
+| --- | --- | --- |
+| Admin-key guard on operator mutations, audit actor from `X-Actor` | yes | yes |
+| Per-client rate limit on `POST /v1/transfers` (peer-IP keyed) | yes | yes |
+| Production weak/unset `ADMIN_KEY` startup guard (`APP_ENV`) | yes | yes |
+| NATS auth via `NATS_CREDS` / authenticated URL | yes | yes |
+| Bounded, recycling DB connection pool | yes | yes |
+| Outbox/inbox/DLQ retention job | no | yes |
+| Continuous ledger reconciliation (balance/posting invariants) | no | yes |
 
 ## Observability (full parity)
 
 Structured JSON logs, Prometheus metrics, OpenTelemetry traces (OTLP -> Jaeger).
 The Rust backend additionally propagates the W3C trace context through the outbox
-and broker, so transfer and consumer spans share one trace.
+and broker, so transfer and consumer spans share one trace, and exposes ledger
+reconciliation drift gauges.
