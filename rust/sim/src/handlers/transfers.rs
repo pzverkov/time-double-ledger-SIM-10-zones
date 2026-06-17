@@ -252,6 +252,7 @@ async fn apply_transfer_inner(
     let payload = json!({
         "event_id": "generated_by_db",
         "type": "TransferPosted",
+        "schema_version": crate::config::EVENT_SCHEMA_VERSION,
         "transaction_id": txn_id,
         "request_id": request_id,
         "zone_id": zone_id,
