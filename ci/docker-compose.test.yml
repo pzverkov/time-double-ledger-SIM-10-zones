@@ -41,6 +41,8 @@ services:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger?sslmode=disable
       - NATS_URL=nats://nats:4222
       - ADMIN_KEY=test-admin-key
+      # Disable rate limiting so contract-test fuzzing is not throttled.
+      - RATE_LIMIT_RPS=0
     ports:
       - "8080:8080"
 
@@ -59,5 +61,7 @@ services:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/timeledger
       - NATS_URL=nats://nats:4222
       - ADMIN_KEY=test-admin-key
+      # Disable rate limiting so contract-test fuzzing is not throttled.
+      - RATE_LIMIT_RPS=0
     ports:
       - "8081:8081"

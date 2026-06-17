@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -15,7 +16,12 @@ type Config struct {
 	OtelEndpoint     string
 	AdminKey         string
 	AppEnv           string
+	RateLimitRPS     int
 }
+
+// Default per-client request rate (tokens/sec) on the public write path when
+// RATE_LIMIT_RPS is unset. 0 disables limiting.
+const defaultRateLimitRPS = 50
 
 func LoadConfigFromEnv() Config {
 	cfg := Config{
@@ -27,9 +33,15 @@ func LoadConfigFromEnv() Config {
 		AdminKey:         os.Getenv("ADMIN_KEY"),
 		AppEnv:           os.Getenv("APP_ENV"),
 		CorsAllowOrigins: os.Getenv("CORS_ALLOW_ORIGINS"),
+		RateLimitRPS:     defaultRateLimitRPS,
 	}
 	if p := os.Getenv("PORT"); p != "" {
 		cfg.Port = p
+	}
+	if v := os.Getenv("RATE_LIMIT_RPS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RateLimitRPS = n
+		}
 	}
 	if cfg.CorsAllowOrigins == "" {
 		cfg.CorsAllowOrigins = "http://localhost:5173,http://localhost:4173"
