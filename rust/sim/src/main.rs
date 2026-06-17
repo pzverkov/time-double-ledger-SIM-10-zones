@@ -254,6 +254,60 @@ async fn main() {
         });
     }
 
+    // Continuous ledger reconciliation: re-derive balances from the immutable
+    // postings and flag any drift, plus any transaction whose postings do not
+    // net to zero. Read-only; runs regardless of broker. Exposes gauges so drift
+    // is alertable, and logs a warning when nonzero.
+    {
+        let pool = pool.clone();
+        let cancel = cancel.clone();
+        let drift_gauge = metrics_state.ledger_balance_drift_accounts.clone();
+        let unbalanced_gauge = metrics_state.ledger_unbalanced_transactions.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(time_ledger_sim_rust::config::RECONCILE_INTERVAL);
+            loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => return,
+                    _ = interval.tick() => {
+                        let Ok(client) = pool.get().await else { continue };
+                        let drift: i64 = match client
+                            .query_one(
+                                "SELECT COUNT(*)::bigint FROM balances b \
+                                 LEFT JOIN (SELECT account_id, SUM(CASE direction WHEN 'CREDIT' THEN amount_units ELSE -amount_units END) AS net \
+                                            FROM postings GROUP BY account_id) p ON p.account_id = b.account_id \
+                                 WHERE b.balance_units <> COALESCE(p.net, 0)",
+                                &[],
+                            )
+                            .await
+                        {
+                            Ok(r) => r.get(0),
+                            Err(e) => { warn!(error = %e, "reconciliation balance query failed"); continue; }
+                        };
+                        let unbalanced: i64 = match client
+                            .query_one(
+                                "SELECT COUNT(*)::bigint FROM (SELECT txn_id FROM postings GROUP BY txn_id \
+                                 HAVING SUM(CASE direction WHEN 'CREDIT' THEN amount_units ELSE -amount_units END) <> 0) t",
+                                &[],
+                            )
+                            .await
+                        {
+                            Ok(r) => r.get(0),
+                            Err(e) => { warn!(error = %e, "reconciliation transaction query failed"); continue; }
+                        };
+                        drift_gauge.set(drift);
+                        unbalanced_gauge.set(unbalanced);
+                        if drift > 0 || unbalanced > 0 {
+                            warn!(balance_drift_accounts = drift, unbalanced_transactions = unbalanced, "ledger reconciliation detected drift");
+                        } else {
+                            tracing::debug!("ledger reconciliation ok");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     let st = AppState {
         db: pool,
         admin_key,

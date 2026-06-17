@@ -39,6 +39,13 @@ trace context is carried through the outbox and broker into the fraud/analytics
 consumers, so a transfer and the work it triggers form a single end-to-end trace.
 Compose also runs Prometheus and Grafana.
 
+Continuous reconciliation (Rust backend): a periodic job re-derives each account's
+balance from the immutable postings and compares it to the materialized
+`balances` row, and counts any transaction whose postings do not net to zero. Both
+counts are exposed as gauges (`ledger_balance_drift_accounts`,
+`ledger_unbalanced_transactions`) and should always be 0; a nonzero value logs a
+warning and is alertable.
+
 ## Event pipeline (the core design)
 
 1. A transfer writes the ledger rows and an `outbox_events` row in one DB

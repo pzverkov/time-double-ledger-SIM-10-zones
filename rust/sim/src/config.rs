@@ -41,6 +41,9 @@ pub const DEFAULT_RATE_LIMIT_RPS: u32 = 50;
 /// to the event envelope; consumers reject versions they do not support.
 pub const EVENT_SCHEMA_VERSION: i64 = 1;
 
+/// How often the ledger reconciliation job re-checks invariants.
+pub const RECONCILE_INTERVAL: Duration = Duration::from_secs(300);
+
 /// Known weak/example admin keys that must never guard a production deployment.
 pub const WEAK_ADMIN_KEYS: &[&str] = &[
     "dev-admin-key",
