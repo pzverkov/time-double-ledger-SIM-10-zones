@@ -22,6 +22,7 @@ func NewFraudConsumer(db *pgxpool.Pool, js nats.JetStreamContext, log *slog.Logg
 
 type transferPosted struct {
 	EventID       string `json:"event_id"`
+	SchemaVersion int    `json:"schema_version"`
 	TransactionID string `json:"transaction_id"`
 	ZoneID        string `json:"zone_id"`
 	AmountUnits   int64  `json:"amount_units"`
@@ -64,6 +65,14 @@ func (c *FraudConsumer) handleMsg(ctx context.Context, msg *nats.Msg) error {
 		ev.EventID = msg.Header.Get("Nats-Msg-Id")
 	}
 	if ev.EventID == "" {
+		_ = msg.Ack()
+		return nil
+	}
+
+	// Reject an unsupported schema version (0 means absent => treat as current).
+	// No DLQ on this consumer, so ack to skip rather than redeliver forever.
+	if ev.SchemaVersion != 0 && ev.SchemaVersion != EventSchemaVersion {
+		c.log.Warn("unsupported event schema_version, skipping", "event_id", ev.EventID, "schema_version", ev.SchemaVersion)
 		_ = msg.Ack()
 		return nil
 	}

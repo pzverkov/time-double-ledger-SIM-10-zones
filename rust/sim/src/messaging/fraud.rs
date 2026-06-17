@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::broker::{BrokerError, EventHandler, IncomingEvent};
-use super::store::{FraudStore, Incident, TransferPosted, fraud_verdict};
+use super::store::{FraudStore, Incident, TransferPosted, fraud_verdict, supported_event_version};
 
 pub const CONSUMER: &str = "fraud-v1";
 
@@ -21,6 +21,9 @@ impl FraudHandler {
 impl EventHandler for FraudHandler {
     async fn handle(&self, event: &IncomingEvent) -> Result<(), BrokerError> {
         let ev: TransferPosted = serde_json::from_slice(&event.payload)?;
+        if !supported_event_version(ev.schema_version) {
+            return Err(format!("unsupported event schema_version {:?}", ev.schema_version).into());
+        }
         let event_id = ev
             .event_id
             .clone()
@@ -130,6 +133,27 @@ mod tests {
         let h = FraudHandler::new(store);
         let err = h.handle(&event("e1", "zone-eu", 5000)).await;
         assert!(err.is_err()); // consumer will not ack -> redelivered
+    }
+
+    #[tokio::test]
+    async fn unsupported_schema_version_is_rejected() {
+        let store = Arc::new(FakeFraudStore::default());
+        let h = FraudHandler::new(store.clone());
+        let body = serde_json::to_vec(&serde_json::json!({
+            "event_id": "e1",
+            "schema_version": 999,
+            "amount_units": 5000,
+        }))
+        .unwrap();
+        let res = h
+            .handle(&IncomingEvent {
+                msg_id: Some("e1".into()),
+                traceparent: None,
+                payload: body,
+            })
+            .await;
+        assert!(res.is_err());
+        assert!(store.seen.lock().unwrap().is_empty()); // not processed
     }
 
     #[tokio::test]
