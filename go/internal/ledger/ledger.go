@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log/slog"
+
+	"time-ledger-sim/go/internal/messaging"
 )
 
 type Ledger struct {
@@ -913,6 +915,7 @@ func (l *Ledger) applyTransferTx(ctx context.Context, tx pgx.Tx, in CreateTransf
 	// transactional outbox event => JetStream => fraud consumer
 	payload := map[string]any{
 		"event_id":       "generated_by_db",
+		"schema_version": messaging.EventSchemaVersion,
 		"transaction_id": txnID,
 		"zone_id":        in.ZoneID,
 		"amount_units":   in.AmountUnits,

@@ -15,6 +15,15 @@ pub struct TransferPosted {
     pub transaction_id: Option<String>,
     pub zone_id: Option<String>,
     pub amount_units: Option<i64>,
+    pub schema_version: Option<i64>,
+}
+
+/// Whether this consumer can process an event of the given schema version. A
+/// missing version is treated as the current version for backward compatibility
+/// with events published before versioning. A newer/unknown version is rejected
+/// so a consumer never silently mis-parses an evolved envelope.
+pub fn supported_event_version(v: Option<i64>) -> bool {
+    matches!(v, None | Some(crate::config::EVENT_SCHEMA_VERSION))
 }
 
 /// An unpublished outbox row.
@@ -327,6 +336,22 @@ mod tests {
                 total_amount_units: 150
             }
         );
+    }
+
+    #[test]
+    fn supported_event_version_accepts_current_and_absent() {
+        assert!(supported_event_version(None));
+        assert!(supported_event_version(Some(
+            crate::config::EVENT_SCHEMA_VERSION
+        )));
+    }
+
+    #[test]
+    fn supported_event_version_rejects_unknown() {
+        assert!(!supported_event_version(Some(
+            crate::config::EVENT_SCHEMA_VERSION + 1
+        )));
+        assert!(!supported_event_version(Some(0)));
     }
 
     #[test]

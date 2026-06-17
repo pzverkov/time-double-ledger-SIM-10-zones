@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use super::broker::{BrokerError, EventHandler, IncomingEvent};
-use super::store::{AnalyticsStore, TransferPosted};
+use super::store::{AnalyticsStore, TransferPosted, supported_event_version};
 
 pub const CONSUMER: &str = "analytics-v1";
 
@@ -22,6 +22,9 @@ impl AnalyticsHandler {
 impl EventHandler for AnalyticsHandler {
     async fn handle(&self, event: &IncomingEvent) -> Result<(), BrokerError> {
         let ev: TransferPosted = serde_json::from_slice(&event.payload)?;
+        if !supported_event_version(ev.schema_version) {
+            return Err(format!("unsupported event schema_version {:?}", ev.schema_version).into());
+        }
         let event_id = ev
             .event_id
             .clone()
