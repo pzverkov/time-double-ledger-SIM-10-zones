@@ -97,6 +97,17 @@ func New(ctx context.Context, cfg Config) (*App, error) {
 	r := chi.NewRouter()
 	r.Use(web.CORSMiddleware(cfg.CorsAllowOrigins))
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
+	// Dependency-aware readiness: a bounded DB ping, 503 when the pool is unhealthy.
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("ready"))
+	})
 	r.Handle("/metrics", promhttp.Handler())
 
 	api := web.NewAPI(cfg.AdminKey, cfg.RateLimitRPS, cfg.TrustProxy, led, logger)
