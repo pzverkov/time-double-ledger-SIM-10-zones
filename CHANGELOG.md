@@ -33,11 +33,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - BREAKING: operator mutations (zone status/controls, spool replay, incident actions) now require `X-Admin-Key`; the request-body `actor` field is removed and the audit actor is derived from the `X-Actor` header, so an unauthenticated request can no longer write a forged audit record
 - Production startup guard refuses a weak or unset `ADMIN_KEY` when `APP_ENV=production`
 - Broker authentication via `NATS_CREDS` (JWT/nkey file) or an authenticated/`tls://` `NATS_URL`
+- Dropped a vulnerable transitive `esbuild` by moving the web build to Vite 8
 
 ### Fixed
 - SQL parameter type-inference bugs (uuid binds, `jsonb_build_object` casts) across the handler write paths and the Go fraud consumer
 - Omitted transfer `metadata` defaults to an empty object instead of null
 - Contract-test flakes: e2e timing, Schemathesis transport retries, and transient registry pull timeouts
+
+### Bumped
+- Dependency updates across the Go, Rust, and web stacks to current versions
 
 ## [0.3.1] - 2026-04-28
 
