@@ -11,6 +11,10 @@ import { check } from "k6";
 
 const BASE_URL = __ENV.BASE_URL || "http://localhost:8081";
 const RATE = parseInt(__ENV.RATE || "200", 10);
+// Distinct account pairs to spread writes across. Default 1 keeps every transfer
+// on the same hot pair (a worst-case lock-contention gate); raise it to measure
+// throughput without the artificial hot-row serialization.
+const ACCTS = parseInt(__ENV.ACCTS || "1", 10);
 const DURATION = __ENV.DURATION || "30s";
 const LARGE_PCT = parseInt(__ENV.LARGE_PCT || "10", 10);
 const ZONES = ["zone-na", "zone-sa", "zone-eu", "zone-af", "zone-ap"];
@@ -37,10 +41,11 @@ export default function () {
   const large = Math.random() * 100 < LARGE_PCT;
   const amount = large ? 4000 + Math.floor(Math.random() * 4000) : 1 + Math.floor(Math.random() * 1000);
   const zone = ZONES[Math.floor(Math.random() * ZONES.length)];
+  const pair = ACCTS > 1 ? Math.floor(Math.random() * ACCTS) : "";
   const body = JSON.stringify({
     request_id: `k6-${__VU}-${__ITER}-${Date.now()}`,
-    from_account: "acct-src",
-    to_account: "acct-dst",
+    from_account: `acct-src${pair}`,
+    to_account: `acct-dst${pair}`,
     amount_units: amount,
     zone_id: zone,
     metadata: {},
