@@ -41,7 +41,9 @@ export default function () {
   const large = Math.random() * 100 < LARGE_PCT;
   const amount = large ? 4000 + Math.floor(Math.random() * 4000) : 1 + Math.floor(Math.random() * 1000);
   const zone = ZONES[Math.floor(Math.random() * ZONES.length)];
-  const pair = ACCTS > 1 ? Math.floor(Math.random() * ACCTS) : "";
+  // Deterministic round-robin across pairs (reproducible spread; also avoids
+  // routing Math.random into an account identifier).
+  const pair = ACCTS > 1 ? (__VU + __ITER) % ACCTS : "";
   const body = JSON.stringify({
     request_id: `k6-${__VU}-${__ITER}-${Date.now()}`,
     from_account: `acct-src${pair}`,
