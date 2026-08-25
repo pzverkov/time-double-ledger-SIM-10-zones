@@ -25,7 +25,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tower-http = { version = "0.6", features = ["timeout", "trace"] }
 futures = "0.3"
 async-trait = "0.1"
-rdkafka = { version = "0.37", features = ["tokio"], optional = true }
+rdkafka = { version = "0.39", features = ["tokio"], optional = true }
 
 [features]
 default = []
@@ -33,7 +33,7 @@ redpanda = ["dep:rdkafka"]
 
 [dev-dependencies]
 http-body-util = "0.1"
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "messaging"
