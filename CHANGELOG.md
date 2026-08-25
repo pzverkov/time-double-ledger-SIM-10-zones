@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-25
+
+### Added
+- Go vs Rust backend benchmark writeup in `docs/benchmarks.md`
+
+### Fixed
+- Updated go, rust, and web dependencies to clear all open dependabot security alerts (x/crypto, grpc, postcss, tokio-postgres, postgres-protocol, cmov, crossbeam-epoch)
+
 ## [0.4.1] - 2026-06-18
 
 ### Added
